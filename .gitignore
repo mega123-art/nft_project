@@ -1,4 +1,8 @@
-data/
+# Datasets and footage are too big for git, but the unified class config
+# is the one file in here the repo needs (git needs the dir un-ignored
+# before a file inside it can be re-included).
+data/*
+!data/data.yaml
 models/*.pt
 logs/
 runs/

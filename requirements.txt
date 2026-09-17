@@ -8,3 +8,4 @@ pyttsx3
 # pygame has no cp314 wheel; pygame-ce is a drop-in replacement (import pygame unchanged)
 pygame-ce
 pyyaml
+roboflow
