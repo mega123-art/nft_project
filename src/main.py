@@ -1,15 +1,18 @@
 """
-Phase 0 scaffold: just a capture loop.
+Phase 0 scaffold, now with Phase 2's detector wired in.
 
 Opens either a video file (given as an argument) or the default webcam,
-shows the frames, and quits on 'q'. Later phases will plug a detector into
-the run() loop without needing to touch the open/close logic here.
+shows the frames, and quits on 'q'. When --weights is not given this is
+still exactly the Phase 0 plain capture loop. When --weights is given,
+each frame is run through src/detector.py and boxes are drawn on it.
 """
 
 import argparse
 import time
 
 import cv2
+
+from detector import Detector
 
 
 def open_source(source_arg):
@@ -33,12 +36,37 @@ def open_source(source_arg):
     return cap, is_camera
 
 
-def run(cap, headless, max_frames):
-    """Read frames until the source ends, max_frames is hit, or 'q' is pressed."""
+def draw_detections(frame, detections):
+    """Draw one box + label per detection directly onto the given frame."""
+    for det in detections:
+        p1 = (int(det.x1), int(det.y1))
+        p2 = (int(det.x2), int(det.y2))
+        cv2.rectangle(frame, p1, p2, (0, 255, 0), 2)
+
+        id_part = f" id{det.track_id}" if det.track_id is not None else ""
+        label = f"{det.cls_name} {det.conf:.2f}{id_part}"
+
+        # small filled bar behind the text so it stays readable over any
+        # background colour, instead of raw text with no contrast
+        (text_w, text_h), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+        label_y1 = max(p1[1] - text_h - 6, 0)
+        cv2.rectangle(frame, (p1[0], label_y1), (p1[0] + text_w + 4, p1[1]), (0, 255, 0), -1)
+        cv2.putText(
+            frame, label, (p1[0] + 2, p1[1] - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1
+        )
+
+
+def run(cap, headless, max_frames, detector):
+    """Read frames until the source ends, max_frames is hit, or 'q' is pressed.
+
+    When detector is None this is the plain Phase 0 loop, unchanged. When a
+    detector is given, each frame is also run through it and boxes are drawn.
+    """
     frame_count = 0
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     start_time = time.time()
+    inference_times = []  # seconds per frame, only filled in when detector is set
 
     while True:
         ok, frame = cap.read()
@@ -47,6 +75,12 @@ def run(cap, headless, max_frames):
             break
 
         frame_count += 1
+
+        if detector is not None:
+            infer_start = time.time()
+            detections = detector.detect(frame)
+            inference_times.append(time.time() - infer_start)
+            draw_detections(frame, detections)
 
         if not headless:
             cv2.imshow("road-crossing", frame)
@@ -65,15 +99,28 @@ def run(cap, headless, max_frames):
         print(f"resolution: {width}x{height}")
         print(f"measured fps: {fps:.2f}")
 
+        if inference_times:
+            mean_ms = 1000.0 * sum(inference_times) / len(inference_times)
+            inference_fps = 1000.0 / mean_ms if mean_ms > 0 else 0.0
+            print(f"mean inference time: {mean_ms:.1f} ms/frame")
+            print(f"inference-only fps: {inference_fps:.2f}")
+
 
 def main():
     parser = argparse.ArgumentParser(description="Road-crossing capture loop (Phase 0)")
     parser.add_argument("video", nargs="?", default=None, help="path to a video file (default: webcam 0)")
     parser.add_argument("--headless", action="store_true", help="run without a display window")
     parser.add_argument("--max-frames", type=int, default=None, help="stop after this many frames")
+    parser.add_argument(
+        "--weights",
+        default=None,
+        help="path to YOLO weights; when given, run detection and draw boxes",
+    )
     args = parser.parse_args()
 
     cap, is_camera = open_source(args.video)
+
+    detector = Detector(args.weights) if args.weights else None
 
     max_frames = args.max_frames
     # A live camera never hits end-of-stream on its own. Without a display
@@ -85,10 +132,14 @@ def main():
         print("note: headless camera capture, stopping after 300 frames (override with --max-frames)")
 
     try:
-        run(cap, args.headless, max_frames)
+        run(cap, args.headless, max_frames, detector)
     finally:
         cap.release()
-        cv2.destroyAllWindows()
+        if not args.headless:
+            # Only a windowed run has windows to destroy. Calling this on an
+            # OpenCV build without GUI support raises, which would turn a
+            # clean headless run into a crash for no reason.
+            cv2.destroyAllWindows()
 
 
 if __name__ == "__main__":

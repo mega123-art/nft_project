@@ -2,6 +2,11 @@
 # (`sudo apt install espeak-ng`). Not installed on this machine yet;
 # only required starting Phase 7.
 ultralytics>=8.3
+# opencv-python is the GUI build and cv2.imshow is the whole demo. roboflow
+# depends on opencv-python-headless, which installs over the same cv2 package
+# and silently removes GUI support. If imshow or destroyAllWindows starts
+# raising "rebuild the library with GTK+", run:
+#   pip uninstall -y opencv-python opencv-python-headless && pip install opencv-python
 opencv-python
 numpy
 pyttsx3
