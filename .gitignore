@@ -1,0 +1,11 @@
+data/
+models/*.pt
+logs/
+runs/
+__pycache__/
+*.py[cod]
+*.mp4
+.venv/
+
+# local Claude Code settings
+.claude/settings.local.json

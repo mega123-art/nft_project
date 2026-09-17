@@ -1,0 +1,10 @@
+# Note: pyttsx3 needs the system package espeak-ng on Linux
+# (`sudo apt install espeak-ng`). Not installed on this machine yet;
+# only required starting Phase 7.
+ultralytics>=8.3
+opencv-python
+numpy
+pyttsx3
+# pygame has no cp314 wheel; pygame-ce is a drop-in replacement (import pygame unchanged)
+pygame-ce
+pyyaml
