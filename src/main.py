@@ -1,19 +1,24 @@
 """
-Phase 0 scaffold, now with Phase 2's detector wired in.
+Phase 0 scaffold, now with Phase 2's detector, Phase 5's tracker and
+Phase 6's decision FSM wired in.
 
 Opens either a video file (given as an argument) or the default webcam,
 shows the frames, and quits on 'q'. When --weights is not given this is
 still exactly the Phase 0 plain capture loop. When --weights is given,
-each frame is run through src/detector.py and boxes are drawn on it.
+each frame is run through src/detector.py, fed to a VehicleTracker
+(Phase 5) and a CrossingFSM (Phase 6), and boxes + TTC + the current
+verdict are drawn on it.
 """
 
 import argparse
+import os
 import time
 
 import cv2
 
 from detector import Detector
 from safety import VehicleTracker, APPROACHING, UNKNOWN
+from fsm import CrossingFSM, SAFE_TO_CROSS, WAITING
 
 
 def open_source(source_arg):
@@ -99,24 +104,56 @@ def draw_min_ttc(frame, min_ttc):
     cv2.putText(frame, text, (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
 
 
-def run(cap, headless, max_frames, detector):
+def draw_verdict(frame, verdict):
+    """Draw Phase 6's current state + reason, and the crosswalk direction
+    when one is known. This is the Phase 6 "done" check from PLAN.md: the
+    state and reason must be visible on the video and behave sanely.
+
+    Colour follows the same "default to caution" rule the FSM itself
+    follows: only SAFE_TO_CROSS gets green, everything else (including
+    SEARCHING) is drawn in a caution colour, never green by default.
+    """
+    color = (0, 200, 0) if verdict.state == SAFE_TO_CROSS else (0, 165, 255)
+    text = f"{verdict.state}: {verdict.reason}"
+    cv2.putText(frame, text, (10, 55), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+
+    if verdict.crosswalk_direction is not None:
+        cv2.putText(
+            frame, f"crossing: {verdict.crosswalk_direction}", (10, 80),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1,
+        )
+
+
+def run(cap, headless, max_frames, detector, save_frames_dir=None, save_frames_every=15):
     """Read frames until the source ends, max_frames is hit, or 'q' is pressed.
 
     When detector is None this is the plain Phase 0 loop, unchanged. When a
     detector is given, each frame is also run through it, fed to a
-    VehicleTracker (Phase 5) for time-to-contact, and boxes + TTC are drawn.
+    VehicleTracker (Phase 5) for time-to-contact and a CrossingFSM
+    (Phase 6) for the crossing verdict, and boxes + TTC + the verdict are
+    drawn.
+
+    save_frames_dir, when given, writes an annotated JPEG every
+    save_frames_every frames (capped at 3 total) -- used to produce the
+    Phase 6 "done" check screenshots without touching the report/
+    generation scripts under scripts/.
     """
     frame_count = 0
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     start_time = time.time()
     inference_times = []  # seconds per frame, only filled in when detector is set
+    saved_frames = 0
 
-    # Only needed when we actually have detections to track. Real elapsed
-    # time (time.time()), not a frame counter, feeds safety.py's dt -- the
-    # pipeline's fps varies (8-15 fps), so a fixed-dt assumption would make
-    # the TTC estimate wrong.
+    # Only needed when we actually have detections to track/decide on. Real
+    # elapsed time (time.time()), not a frame counter, feeds safety.py's dt
+    # -- the pipeline's fps varies (8-15 fps), so a fixed-dt assumption
+    # would make the TTC estimate wrong.
     tracker = VehicleTracker() if detector is not None else None
+    fsm = CrossingFSM() if detector is not None else None
+
+    if save_frames_dir is not None:
+        os.makedirs(save_frames_dir, exist_ok=True)
 
     while True:
         ok, frame = cap.read()
@@ -131,8 +168,19 @@ def run(cap, headless, max_frames, detector):
             detections = detector.detect(frame)
             inference_times.append(time.time() - infer_start)
             tracker.update(detections, infer_start)
+            verdict = fsm.update(detections, tracker, width)
             draw_detections(frame, detections, tracker)
             draw_min_ttc(frame, tracker.min_ttc())
+            draw_verdict(frame, verdict)
+
+            if (
+                save_frames_dir is not None
+                and saved_frames < 3
+                and frame_count % save_frames_every == 0
+            ):
+                out_path = os.path.join(save_frames_dir, f"frame_{frame_count:04d}.jpg")
+                cv2.imwrite(out_path, frame)
+                saved_frames += 1
 
         if not headless:
             cv2.imshow("road-crossing", frame)
@@ -168,6 +216,13 @@ def main():
         default=None,
         help="path to YOLO weights; when given, run detection and draw boxes",
     )
+    parser.add_argument(
+        "--save-frames",
+        default=None,
+        metavar="DIR",
+        help="save up to 3 annotated frames (state + reason drawn) to this "
+        "directory, for phase done-check screenshots; requires --weights",
+    )
     args = parser.parse_args()
 
     cap, is_camera = open_source(args.video)
@@ -184,7 +239,7 @@ def main():
         print("note: headless camera capture, stopping after 300 frames (override with --max-frames)")
 
     try:
-        run(cap, args.headless, max_frames, detector)
+        run(cap, args.headless, max_frames, detector, save_frames_dir=args.save_frames)
     finally:
         cap.release()
         if not args.headless:
