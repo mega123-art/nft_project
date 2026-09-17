@@ -13,6 +13,7 @@ import time
 import cv2
 
 from detector import Detector
+from safety import VehicleTracker, APPROACHING, UNKNOWN
 
 
 def open_source(source_arg):
@@ -36,8 +37,21 @@ def open_source(source_arg):
     return cap, is_camera
 
 
-def draw_detections(frame, detections):
-    """Draw one box + label per detection directly onto the given frame."""
+def draw_detections(frame, detections, tracker=None):
+    """Draw one box + label per detection directly onto the given frame.
+
+    When a VehicleTracker is given (Phase 5), also draw that vehicle's
+    current time-to-contact above its label, and the frame's min_ttc in a
+    corner -- the "done" check for Phase 5 is that this number appears and
+    visibly falls as a vehicle approaches.
+
+    A vehicle's status (see safety.py: APPROACHING / NOT_APPROACHING /
+    UNKNOWN) also shows up here, subtly, mainly so it's visible while
+    debugging: APPROACHING gets the TTC number, UNKNOWN gets a small "?"
+    (we cannot yet say whether it's a threat -- this is the one Phase 6
+    must never read as "safe"), and NOT_APPROACHING gets nothing extra --
+    an assessed, non-threatening vehicle needs no further comment.
+    """
     for det in detections:
         p1 = (int(det.x1), int(det.y1))
         p2 = (int(det.x2), int(det.y2))
@@ -55,18 +69,54 @@ def draw_detections(frame, detections):
             frame, label, (p1[0] + 2, p1[1] - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1
         )
 
+        if tracker is None:
+            continue
+        status = tracker.get_status(det.track_id)
+        tag_y = max(label_y1 - 4, 10)
+
+        if status == APPROACHING:
+            ttc = tracker.get_ttc(det.track_id)
+            # Red, above the class label -- a second line so it never overlaps it.
+            cv2.putText(
+                frame, f"TTC {ttc:.1f}s", (p1[0] + 2, tag_y),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 255), 2,
+            )
+        elif status == UNKNOWN:
+            # Yellow "?" -- not enough data yet to say either way. Kept
+            # deliberately small: this is a debugging aid, not a warning.
+            cv2.putText(
+                frame, "?", (p1[0] + 2, tag_y),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 220, 255), 2,
+            )
+        # status == NOT_APPROACHING (or no status yet): no extra text --
+        # an assessed, non-threatening vehicle doesn't need a marker.
+
+
+def draw_min_ttc(frame, min_ttc):
+    """Draw the smallest TTC across the whole frame in the top-left corner."""
+    text = f"min TTC: {min_ttc:.1f}s" if min_ttc is not None else "min TTC: --"
+    color = (0, 0, 255) if min_ttc is not None else (200, 200, 200)
+    cv2.putText(frame, text, (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+
 
 def run(cap, headless, max_frames, detector):
     """Read frames until the source ends, max_frames is hit, or 'q' is pressed.
 
     When detector is None this is the plain Phase 0 loop, unchanged. When a
-    detector is given, each frame is also run through it and boxes are drawn.
+    detector is given, each frame is also run through it, fed to a
+    VehicleTracker (Phase 5) for time-to-contact, and boxes + TTC are drawn.
     """
     frame_count = 0
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     start_time = time.time()
     inference_times = []  # seconds per frame, only filled in when detector is set
+
+    # Only needed when we actually have detections to track. Real elapsed
+    # time (time.time()), not a frame counter, feeds safety.py's dt -- the
+    # pipeline's fps varies (8-15 fps), so a fixed-dt assumption would make
+    # the TTC estimate wrong.
+    tracker = VehicleTracker() if detector is not None else None
 
     while True:
         ok, frame = cap.read()
@@ -80,7 +130,9 @@ def run(cap, headless, max_frames, detector):
             infer_start = time.time()
             detections = detector.detect(frame)
             inference_times.append(time.time() - infer_start)
-            draw_detections(frame, detections)
+            tracker.update(detections, infer_start)
+            draw_detections(frame, detections, tracker)
+            draw_min_ttc(frame, tracker.min_ttc())
 
         if not headless:
             cv2.imshow("road-crossing", frame)

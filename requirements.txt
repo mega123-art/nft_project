@@ -15,3 +15,4 @@ pygame-ce
 pyyaml
 roboflow
 yt-dlp
+pytest
