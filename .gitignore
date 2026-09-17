@@ -3,6 +3,11 @@
 # before a file inside it can be re-included).
 data/*
 !data/data.yaml
+# Labelling conventions, the source list and the licence audit trail are
+# documents, not data. They are useless if they only exist on one laptop.
+!data/LABELLING.md
+!data/video_sources.txt
+!data/video_manifest.json
 models/*.pt
 logs/
 runs/

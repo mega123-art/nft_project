@@ -14,3 +14,4 @@ pyttsx3
 pygame-ce
 pyyaml
 roboflow
+yt-dlp

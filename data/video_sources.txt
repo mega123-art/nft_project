@@ -1,0 +1,34 @@
+# Phase 4 supplementary footage sources for scripts/fetch_videos.py.
+#
+# One URL per line. Lines starting with '#', and anything after a '#' on a
+# line, are treated as comments and ignored. Blank lines are ignored.
+#
+# What this file is for: our own phone footage is the core of the dataset
+# (see PLAN.md Phase 4 step 1) but it has almost no traffic-signal frames.
+# These lines should point at a small number of supplementary clips that
+# fill signal_red / signal_green and hard conditions (night, rain) that are
+# awkward to film ourselves in the time we have.
+#
+# How to find footage that is actually safe to use:
+#   1. Search YouTube for something like "traffic signal junction India" or
+#      "road crossing night rain".
+#   2. Click Filters -> Features -> Creative Commons. This restricts results
+#      to videos the uploader has licensed CC BY, which allows reuse with
+#      attribution.
+#   3. Still check the individual video's "Show more" description for any
+#      licence statement before adding it here -- the filter narrows the
+#      search, it does not replace reading the actual video page.
+#   4. Prefer stock-footage sites with an explicit free/CC licence (e.g.
+#      Pexels, Pixabay) over scraping regular uploads -- their licence terms
+#      are stated up front per clip.
+#
+# scripts/fetch_videos.py downloads whatever is listed here regardless of
+# licence and records the licence yt-dlp reports into
+# data/video_manifest.json, with a warning printed for anything that is not
+# Creative Commons. It does not block non-CC downloads -- that decision is
+# left to whoever is curating this file. Don't add a clip here unless you
+# have actually checked its licence.
+#
+# Example lines (commented out -- these are not real entries):
+# https://www.youtube.com/watch?v=XXXXXXXXXXX   # signal_red, daytime junction
+# https://www.youtube.com/watch?v=YYYYYYYYYYY   # night footage, wet road
