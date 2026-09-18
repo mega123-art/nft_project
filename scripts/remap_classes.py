@@ -1,6 +1,6 @@
 """
 Phase 1 step 3: remap a downloaded dataset's class IDs onto our unified
-9-class list, dropping everything we don't want.
+10-class list, dropping everything we don't want.
 
 Takes a source dataset directory (as downloaded by download_datasets.py, in
 YOLOv8 format: train/valid/test splits, each with images/ and labels/) and a
@@ -21,7 +21,7 @@ import os
 
 MARKER_NAME = ".remapped"
 
-# our unified 9-class list, in ID order, used only for printing readable
+# our unified 10-class list, in ID order, used only for printing readable
 # per-class counts. It has nothing to do with the source dataset's own names.
 UNIFIED_NAMES = [
     "car",
@@ -33,6 +33,7 @@ UNIFIED_NAMES = [
     "crosswalk",
     "signal_red",
     "signal_green",
+    "signal_countdown",
 ]
 
 
@@ -119,7 +120,7 @@ def image_path_for_label(label_path):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Remap a dataset's class IDs to the unified 9-class list")
+    parser = argparse.ArgumentParser(description="Remap a dataset's class IDs to the unified 10-class list")
     parser.add_argument("dataset_dir", help="path to the downloaded dataset (e.g. data/datasets/indian_roads)")
     parser.add_argument("mapping_json", help="path to a JSON file of {old_id: new_id}")
     parser.add_argument("--dry-run", action="store_true", help="print before/after counts without changing anything")

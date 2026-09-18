@@ -20,6 +20,10 @@ import os
 
 import yaml
 
+# signal_countdown (9) has no source names below and is never produced by
+# this script's mapping -- see PLAN.md's class table and data/LABELLING.md.
+# Listed anyway so UNIFIED_ID/UNIFIED_NAMES stay identical across every
+# copy of this list in the repo.
 UNIFIED_NAMES = [
     "car",
     "bus",
@@ -30,6 +34,7 @@ UNIFIED_NAMES = [
     "crosswalk",
     "signal_red",
     "signal_green",
+    "signal_countdown",
 ]
 UNIFIED_ID = {name: i for i, name in enumerate(UNIFIED_NAMES)}
 
@@ -85,6 +90,39 @@ NAME_TO_UNIFIED = {
     "GreenStraightRight": "signal_green",
     "Green Light": "signal_green",
     "Green-Light": "signal_green",  # defensive, see Red-Light note above
+
+    # --- Phase 4: pedestrian-signal round (ono-gedd7, fyp-wrdsh) ---
+    # ono-gedd7/pedestrian-traffic-light-puf4a's real data.yaml (v1) uses
+    # bare lowercase "green"/"red" -- checked against every data.yaml
+    # already downloaded into data/datasets/ (indian_roads, signals_detection,
+    # signals_small, zebra_crossing) plus the group-e/traffic-si0cm class
+    # lists documented in download_signal_datasets.py's docstring: none of
+    # them contain a bare lowercase "green" or "red", only capitalised
+    # variants (Green, GreenLeft, Red Light, ...), so adding these two keys
+    # cannot silently re-map any class already in this table. Still, this
+    # was only checked against what's on disk right now -- re-verify against
+    # signals_group_e's actual data.yaml once it's downloaded, in case a
+    # future export ever introduces a lowercase name there.
+    "green": "signal_green",
+    "red": "signal_red",
+    # fyp-wrdsh/road-signs-and-traffic-lights-dataset's own vehicle-signal
+    # classes carry the colour in the name already, same pattern as group-e.
+    "Traffic_light_green": "signal_green",
+    "Traffic_light_red": "signal_red",
+    # fyp-wrdsh also already labels car/person/motorcycle directly (lowercase,
+    # COCO-style names) -- "person" is already covered by the existing
+    # lowercase entry above, "car" and "motorcycle" are new lowercase keys.
+    "car": "car",
+    "motorcycle": "motorcycle",
+    # Deliberately NOT mapped, so they fall through the existing
+    # unmapped-name-is-dropped path same as every other dropped class:
+    # ono-gedd7's "pedestrian Traffic Light", "traffic_light", "signal-light"
+    # and "trafficlight". All four are colourless (no red/green distinction
+    # in the class name itself), and data/LABELLING.md section 2 is explicit
+    # that a signal whose colour cannot be read must not be labelled a
+    # colour -- exactly why indian_roads' colourless "Traffic Signal" is
+    # already dropped above. Keeping that rule consistent here matters more
+    # than the extra boxes these four classes would add.
 }
 # Everything else in the Indian dataset's real (v2) 48-class list is dropped
 # on purpose: Traffic Signal (no red/green colour info, so it's useless for
@@ -100,6 +138,10 @@ NAME_TO_UNIFIED = {
 # signal_red and signal_green intentionally have no source names: nothing in
 # the public datasets carries the red/green distinction. They get zero
 # public data by design (Phase 4 fixes this with our own footage).
+#
+# fyp-wrdsh's own ~20 road-sign classes (speed limits, no-entry, bends, etc.)
+# are likewise dropped on purpose here by simply not being in the table --
+# they are not in our 10-class list and were never claimed to be.
 
 
 def load_source_names(dataset_dir):

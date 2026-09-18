@@ -24,9 +24,18 @@ class Detection:
 
 
 class Detector:
-    def __init__(self, weights_path, conf=0.4):
+    def __init__(self, weights_path, conf=0.4, imgsz=960):
         self.model = YOLO(weights_path)
         self.conf = conf
+        # Inference resolution MUST match what the weights were trained at.
+        # models/best.pt is trained at 960. Running it at Ultralytics' 640
+        # default doubles nothing for small signals but shrinks a large
+        # crosswalk out of the scale range the model learned: measured on
+        # the same weights, crosswalk mAP50 is 0.920 at 960 and 0.831 at
+        # 1280, and a 640-trained model inferring at 1280 found no
+        # crosswalks at all. crosswalk is the first rule in fsm.py, so
+        # losing it means the state machine never evaluates anything else.
+        self.imgsz = imgsz
         # class names come from the model itself (whatever it was trained
         # on -- COCO's 80 classes for stock yolov8n.pt, our 9 classes once
         # Phase 2 training is done), never a hardcoded list here.
@@ -39,7 +48,9 @@ class Detector:
         # Without it every call starts a fresh tracker, ids reset to 1, 2, 3...
         # each frame, and Phase 5's time-to-contact (which needs a track_id's
         # box width over several frames) becomes garbage. Do not remove this.
-        results = self.model.track(frame, persist=True, conf=self.conf, verbose=False)
+        results = self.model.track(
+            frame, persist=True, conf=self.conf, imgsz=self.imgsz, verbose=False
+        )
 
         detections = []
         result = results[0]

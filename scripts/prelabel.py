@@ -10,10 +10,11 @@ not error out -- it silently shuffles every class, so the mapping is written
 to disk AND printed every run.
 
 IMPORTANT caveat, printed at the end of every run: models/best.pt (as of
-Phase 2/3) has zero training examples of signal_red and signal_green. A model
-cannot predict a class it has never seen a positive example of. It will not
-draw a single signal box, ever, no matter how --conf is tuned. Every
-signal_red/signal_green box in this dataset has to be drawn by hand.
+Phase 2/3) has zero training examples of signal_red, signal_green, and
+signal_countdown. A model cannot predict a class it has never seen a
+positive example of. It will not draw a single signal box, ever, no matter
+how --conf is tuned. Every signal_red/signal_green/signal_countdown box in
+this dataset has to be drawn by hand.
 """
 
 import argparse
@@ -25,7 +26,7 @@ from ultralytics import YOLO
 
 IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png")
 
-# The unified 9-class list from PLAN.md / data/data.yaml, in ID order. This
+# The unified 10-class list from PLAN.md / data/data.yaml, in ID order. This
 # is what gets written into the output data.yaml/classes.txt. It is only
 # correct as long as --weights was trained on exactly this class list --
 # print it loudly so a mismatch is obvious rather than silently corrupting
@@ -40,9 +41,14 @@ UNIFIED_NAMES = [
     "crosswalk",
     "signal_red",
     "signal_green",
+    "signal_countdown",
 ]
 
-NO_SIGNAL_DATA_CLASSES = {"signal_red", "signal_green"}
+# signal_countdown joins signal_red/signal_green here: no public dataset we
+# use has boxed countdown-timer annotations either, so a model prelabelling
+# with --weights will never propose a signal_countdown box -- every one of
+# those has to be drawn by hand too, same caveat as the other two.
+NO_SIGNAL_DATA_CLASSES = {"signal_red", "signal_green", "signal_countdown"}
 
 
 def find_images(frames_dir):
@@ -163,7 +169,7 @@ def main():
     class_names = [class_names[i] for i in sorted(class_names)]
 
     if class_names != UNIFIED_NAMES:
-        print("warning: model's class list does not match the expected unified 9-class list.")
+        print("warning: model's class list does not match the expected unified 10-class list.")
         print(f"  model:    {class_names}")
         print(f"  expected: {UNIFIED_NAMES}")
         print("  writing labels using the MODEL's own order -- double check before uploading.")
@@ -191,10 +197,11 @@ def main():
         print(f"  {name:<14} {per_class_totals[name]}{flag}")
 
     print(
-        "\nCAVEAT: models/best.pt has no signal_red / signal_green training examples as of "
-        "Phase 2/3. It cannot and will not pre-label any traffic signal, at any --conf. "
-        "Every signal_red and signal_green box in this dataset must be drawn by hand in "
-        "Roboflow -- pre-labelling only saves time on vehicles, person and crosswalk."
+        "\nCAVEAT: models/best.pt has no signal_red / signal_green / signal_countdown "
+        "training examples as of Phase 2/3. It cannot and will not pre-label any traffic "
+        "signal, at any --conf. Every signal_red, signal_green and signal_countdown box "
+        "in this dataset must be drawn by hand in Roboflow -- pre-labelling only saves "
+        "time on vehicles, person and crosswalk."
     )
 
 

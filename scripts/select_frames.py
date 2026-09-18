@@ -70,8 +70,8 @@ from PIL import Image
 
 IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png")
 
-# Same unified 9-class list as prelabel.py / pseudo_label.py / PLAN.md, in ID
-# order. Kept as a literal copy (not imported) because these scripts are
+# Same unified 10-class list as prelabel.py / pseudo_label.py / PLAN.md, in
+# ID order. Kept as a literal copy (not imported) because these scripts are
 # meant to be run independently against whatever labels are on disk.
 UNIFIED_NAMES = [
     "car",
@@ -83,15 +83,19 @@ UNIFIED_NAMES = [
     "crosswalk",
     "signal_red",
     "signal_green",
+    "signal_countdown",
 ]
-CAR_ID, BUS_ID, TRUCK_ID, MOTO_ID, AUTO_ID, PERSON_ID, CROSSWALK_ID, SIGNAL_RED_ID, SIGNAL_GREEN_ID = range(9)
+(
+    CAR_ID, BUS_ID, TRUCK_ID, MOTO_ID, AUTO_ID, PERSON_ID, CROSSWALK_ID,
+    SIGNAL_RED_ID, SIGNAL_GREEN_ID, SIGNAL_COUNTDOWN_ID,
+) = range(10)
 
 CROWD_THRESHOLD = 6  # person boxes at/above this count counts as "unusually crowded" (rule 2)
 BORING_MAX_BOXES = 2  # tier-4 cutoff: at most this many boxes, and only from BORING_CLASSES
 BORING_CLASSES = {CAR_ID, TRUCK_ID}
 
 TIER_LABELS = {
-    0: "signal_red/signal_green present -- zero Indian training data, irreplaceable",
+    0: "signal_red/signal_green/signal_countdown present -- zero Indian training data, irreplaceable",
     1: "crosswalk present -- only 417 crosswalk annotations exist across all datasets",
     2: "autorickshaw/bus present or unusually crowded (person >= 6)",
     3: "ordinary frame with at least one detection",
@@ -131,12 +135,14 @@ def classify(class_ids):
     """Return (tier, reason) for one frame given its list of class ids."""
     counts = {i: class_ids.count(i) for i in set(class_ids)}
 
-    if SIGNAL_RED_ID in counts or SIGNAL_GREEN_ID in counts:
+    if SIGNAL_RED_ID in counts or SIGNAL_GREEN_ID in counts or SIGNAL_COUNTDOWN_ID in counts:
         colours = []
         if SIGNAL_RED_ID in counts:
             colours.append(f"signal_red x{counts[SIGNAL_RED_ID]}")
         if SIGNAL_GREEN_ID in counts:
             colours.append(f"signal_green x{counts[SIGNAL_GREEN_ID]}")
+        if SIGNAL_COUNTDOWN_ID in counts:
+            colours.append(f"signal_countdown x{counts[SIGNAL_COUNTDOWN_ID]}")
         return 0, "tier0: " + ", ".join(colours)
 
     if CROSSWALK_ID in counts:

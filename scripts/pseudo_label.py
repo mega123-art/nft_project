@@ -76,8 +76,11 @@ from ultralytics import YOLO
 
 MARKER_NAME = ".pseudo_labeled"
 
-# our unified 9-class list, in ID order, used only for printing readable
-# per-class counts.
+# our unified 10-class list, in ID order, used only for printing readable
+# per-class counts. signal_countdown (9) is never produced by this script --
+# COCO has no countdown-timer class to pull pseudo-labels from -- but is
+# listed here anyway so this copy matches every other UNIFIED_NAMES in the
+# repo exactly.
 UNIFIED_NAMES = [
     "car",
     "bus",
@@ -88,6 +91,7 @@ UNIFIED_NAMES = [
     "crosswalk",
     "signal_red",
     "signal_green",
+    "signal_countdown",
 ]
 
 # COCO class name -> unified class id. Anything not listed here (train,

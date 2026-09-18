@@ -175,6 +175,75 @@ approaching vehicle that hasn't been watched long enough stays UNKNOWN and
 keeps blocking it. CALLER CONTRACT: Phase 6 must never declare SAFE while
 unresolved_vehicles() is non-zero.
 
+LATERAL CROSSING -- turning vehicles, not just approaching/receding ones.
+The most dangerous real case for a pedestrian is a vehicle turning INTO the
+crossing, not one driving straight at the camera. lateral_drift (the signed
+px/s slope of box-centre movement, computed below) already carries that
+signal, but a raw px/s number is meaningless on its own: 50px/s of drift is
+"crossing our path fast" for a box 40px wide and "barely moving" for a box
+400px wide, because the same real-world sideways speed produces a bigger
+apparent drift the closer (bigger) the box is. So we normalise by the
+vehicle's own (mean) box width, giving crossing_ratio -- a scale-invariant
+"fraction of its own width moved sideways per second". The same real-world
+turn reads the same whether the vehicle is near or far, small or large.
+
+This needs the same false-alarm guard TTC already has, for the same reason
+(a parked vehicle's box-centre jitters by a pixel or two same as its box
+edges do, and that must not read as "crossing" forever). Reusing
+JITTER_PIXELS (not inventing a second, unmeasured constant) keeps the
+assumption consistent across the module: perturbing a centre measurement by
+JITTER_PIXELS over a window of duration T can fake an apparent lateral
+speed of about JITTER_PIXELS / T (no squaring here, unlike TTC_horizon --
+we differentiate the raw centre position directly, not its reciprocal).
+Normalised by width the same way as the real signal, the noise floor on
+crossing_ratio is
+
+    ratio_noise ~= JITTER_PIXELS / (T * mean_width)
+
+A measured crossing_ratio must clear CROSSING_NOISE_MARGIN times this floor
+before TrackState.is_crossing is allowed to be True. Below
+MIN_SAMPLES_FOR_TTC samples (same gate as _assess()), crossing_ratio is None
+and is_crossing is False -- "not enough data" is not "not crossing", but
+unlike the TTC path there is no separate UNKNOWN-style tri-state exposed
+here: is_crossing is a plain bool that VehicleTracker.crossing_vehicles()
+reads for currently-visible tracks, and fsm.py treats "no crossing detected
+yet" the same as "not crossing" for this specific signal, because the
+default output is always WAITING anyway (PLAN.md's ground rule) -- an
+under-confident crossing flag never produces a false SAFE by itself, it
+just means one fewer reason to refuse SAFE. What would be unsafe is the
+reverse (flagging a merely jittering parked car as crossing forever and
+never letting SAFE happen), which is exactly what the noise floor guards.
+
+INTERACTION WITH APPROACHING / NOT_APPROACHING / UNKNOWN -- this is the
+part that actually required changing _assess(), not just adding a new
+field next to it. A vehicle turning into the crossing typically has a WEAK
+box-growth signal while it swings through the turn (it is moving mostly
+sideways, not toward the camera), which is exactly the signal _assess()'s
+early guard (approach_rate < MIN_APPROACH_RATE) and its beyond-horizon
+branch both read as "NOT_APPROACHING -- a real assessment, safe". Before
+this change, a turning vehicle with real lateral drift but weak forward
+growth would sail straight into NOT_APPROACHING and get treated as
+evidence of safety by fsm.py's _road_is_clear() -- precisely the
+false-safe gap this whole addition exists to close. So both places
+_assess() would otherwise return NOT_APPROACHING now check is_crossing
+first: if the track is independently flagged as crossing, the honest
+answer is UNKNOWN (we cannot call this vehicle safe on the growth signal
+alone, and we are not claiming it is definitely a threat by that signal
+either -- crossing_vehicles() is what actually forces the FSM's hand, not
+this status). A track that is both approaching (real box growth) AND
+crossing keeps its normal APPROACHING/ttc status unchanged -- crossing_ratio
+is independent, additive information, not a replacement for the TTC
+assessment; fsm.py is expected to treat "approaching AND crossing" as
+worse than either alone, which it does simply by having both signals
+available to check.
+
+CALLER CONTRACT: fsm.py must treat any vehicle in
+VehicleTracker.crossing_vehicles() as forcing WAITING, regardless of what
+min_ttc() or unresolved_vehicles() say -- a turning vehicle's danger is not
+captured by TTC at all (TTC models a head-on closing distance; a turning
+vehicle's real risk is that its path will intersect the crossing, which
+lateral drift is the only signal in this module that speaks to).
+
 Track history keyed by track_id holds the last few (timestamp, width)
 samples. Differentiating two raw, noisy box-edge measurements directly is
 exactly what PLAN.md warns against -- a one-pixel jitter in a fast-moving
@@ -248,6 +317,16 @@ DECISION_TTC_THRESHOLD = 5.0
 # actually make decisions at."
 HORIZON_SAFETY_MARGIN = 2.0
 
+# The lateral-crossing analogue of HORIZON_SAFETY_MARGIN: how many multiples
+# of the jitter noise floor a measured crossing_ratio must clear before it
+# is trusted as real sideways motion rather than box-centre jitter on a
+# parked vehicle (see module docstring's crossing_ratio derivation). 3x is a
+# plain, explainable margin in the same spirit as HORIZON_SAFETY_MARGIN's
+# 2x -- there is no measured false-positive rate to tune this against yet
+# (same caveat as JITTER_PIXELS itself), so it errs toward requiring a
+# clearer signal rather than a marginal one.
+CROSSING_NOISE_MARGIN = 3.0
+
 # A fit through 2-3 points is exactly the noisy, unstable regime the
 # accelerating/noisy tests above show spurious readings in -- a brand new
 # track must not report a TTC (or, just as bad, a confident-looking None
@@ -304,13 +383,27 @@ class TrackState:
         self.ttc = None
         self.lateral_drift = None  # signed px/s of box-centre movement
 
+        # Scale-invariant lateral crossing signal -- see module docstring.
+        # crossing_ratio is the signed, width-normalised drift once assessed
+        # (None while there isn't enough history to trust it); is_crossing
+        # is the plain bool VehicleTracker.crossing_vehicles() reads, False
+        # both when genuinely not crossing and when not yet assessed (see
+        # docstring for why an under-confident False here is the safe
+        # direction for this particular signal).
+        self.crossing_ratio = None
+        self.is_crossing = False
+
     def add_observation(self, width, centre_x, timestamp):
         self.widths.append(width)
         self.centres.append(centre_x)
         self.timestamps.append(timestamp)
         self.frames_since_seen = 0
-        self.status, self.ttc = self._assess()
         self.lateral_drift = self._compute_lateral_drift()
+        # Crossing must be assessed BEFORE _assess() below -- _assess()
+        # reads self.is_crossing to stop a turning vehicle's weak forward
+        # growth from being misread as NOT_APPROACHING (see docstring).
+        self.crossing_ratio, self.is_crossing = self._assess_crossing()
+        self.status, self.ttc = self._assess()
 
     def _assess(self):
         """Return (status, ttc) for the current window.
@@ -349,8 +442,13 @@ class TrackState:
         if approach_rate < MIN_APPROACH_RATE:
             # Cheap early guard only -- an outright zero or negative rate
             # (shrinking or perfectly flat) needs no noise-horizon
-            # reasoning at all. A real assessment: not a threat.
-            return NOT_APPROACHING, None
+            # reasoning at all. Ordinarily a real assessment: not a threat.
+            # BUT a vehicle turning into the crossing often has exactly this
+            # weak/flat forward-growth signature while it swings sideways --
+            # see module docstring. If lateral drift independently says this
+            # track is crossing, "not a threat" would be a false-safe signal
+            # handed to fsm.py, so refuse to assess rather than clear it.
+            return self._not_approaching_unless_crossing()
 
         latest_t = self.timestamps[-1]
         smoothed_u = u_slope * latest_t + u_intercept
@@ -388,8 +486,20 @@ class TrackState:
         # threshold -- otherwise we cannot honestly rule out a real,
         # decision-relevant approach at this box size.
         if ttc_horizon >= HORIZON_SAFETY_MARGIN * DECISION_TTC_THRESHOLD:
-            return NOT_APPROACHING, None
+            # Same reasoning as the early guard above: a distant/slow
+            # apparent approach that's within noise could still be a
+            # turning vehicle whose sideways motion is the real signal.
+            return self._not_approaching_unless_crossing()
         return UNKNOWN, None
+
+    def _not_approaching_unless_crossing(self):
+        """Shared by both places _assess() would otherwise say
+        NOT_APPROACHING. See module docstring: a turning vehicle can look
+        like "not approaching" on box growth alone while genuinely crossing
+        our path, and that must never read as safety evidence."""
+        if self.is_crossing:
+            return UNKNOWN, None
+        return NOT_APPROACHING, None
 
     def _compute_lateral_drift(self):
         fit = _linear_fit(list(self.timestamps), list(self.centres))
@@ -397,6 +507,43 @@ class TrackState:
             return None
         drift_rate, _intercept = fit
         return drift_rate
+
+    def _assess_crossing(self):
+        """Return (crossing_ratio, is_crossing) for the current window.
+
+        See module docstring for the crossing_ratio derivation and the
+        noise-floor guard. Same MIN_SAMPLES_FOR_TTC/positive-width gate as
+        _assess(), for the same reason: a fit through too few or bad points
+        is not a real assessment.
+        """
+        widths = list(self.widths)
+        if len(widths) < MIN_SAMPLES_FOR_TTC or any(w <= 0 for w in widths):
+            return None, False
+
+        fit = _linear_fit(list(self.timestamps), list(self.centres))
+        if fit is None:
+            return None, False
+        drift_rate, _intercept = fit
+
+        window_duration = self.timestamps[-1] - self.timestamps[0]
+        if window_duration <= 0:
+            return None, False
+
+        # Mean width over the window, not just the latest sample, so one
+        # noisy frame can't swing the normalisation -- same smoothing
+        # intent as the TTC path's smoothed_width.
+        mean_width = sum(widths) / len(widths)
+
+        crossing_ratio = drift_rate / mean_width
+
+        # Noise floor: see module docstring. A JITTER_PIXELS wobble in the
+        # measured centre over this window could fake an apparent lateral
+        # speed of about JITTER_PIXELS / window_duration; normalised by
+        # width the same way as the real signal above.
+        noise_floor_ratio = JITTER_PIXELS / (window_duration * mean_width)
+
+        is_crossing = abs(crossing_ratio) > CROSSING_NOISE_MARGIN * noise_floor_ratio
+        return crossing_ratio, is_crossing
 
 
 class VehicleTracker:
@@ -465,6 +612,32 @@ class VehicleTracker:
         overlay and Phase 6. None if track_id isn't currently tracked."""
         track = self.tracks.get(track_id)
         return track.status if track is not None else None
+
+    def get_crossing_ratio(self, track_id) -> Optional[float]:
+        """Per-track normalised lateral crossing ratio, for the overlay.
+        None unless the track has enough history to assess it (see
+        TrackState._assess_crossing)."""
+        track = self.tracks.get(track_id)
+        return track.crossing_ratio if track is not None else None
+
+    def crossing_vehicles(self):
+        """Currently-visible tracks (frames_since_seen == 0) whose motion
+        indicates they are crossing the user's path -- see module
+        docstring's crossing_ratio derivation. Returns TrackState objects
+        (not just a count) so a caller that wants more than "is anything
+        crossing" (e.g. an overlay, or a future per-vehicle announcement)
+        doesn't have to re-derive it.
+
+        CALLER CONTRACT: fsm.py must treat a non-empty result as forcing
+        WAITING, independent of min_ttc()/unresolved_vehicles() -- a
+        turning vehicle's danger is not something TTC (built for head-on
+        closing distance) can see at all.
+        """
+        return [
+            track
+            for track in self.tracks.values()
+            if track.frames_since_seen == 0 and track.is_crossing
+        ]
 
     def unresolved_vehicles(self):
         """Count of vehicles visible in the current frame with UNKNOWN status.

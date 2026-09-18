@@ -139,7 +139,77 @@ Do not draw one big box around a cluster of people — that teaches the model
 an incorrect object shape and breaks per-person counting, which the safety
 logic may eventually want.
 
-## 8. When in doubt
+## 8. Countdown signals (signal_countdown, class 9) — PROPOSAL
+
+**Status: DRAFT, more so than the rest of this document.** Unlike every
+other class here, there is currently no dataset of any kind -- public or
+our own -- with a single boxed signal_countdown example. This section is
+therefore pure convention-setting for Phase 4 labelling, written before any
+frame has actually been labelled against it. Expect it to need revision
+once the team looks at real footage.
+
+**What to box:** the numeric digit display itself (the LED/LCD panel
+showing the countdown number), not the whole signal head and not the
+pedestrian walking-man icon next to it if the two are physically separate
+housings. This follows the same logic as section 1's signal-lamp rule: the
+digit panel has a hard physical housing edge, while trying to box "the
+countdown as a concept" (including the icon, the pole, the mounting bracket)
+would reintroduce exactly the inter-labeller inconsistency section 1 exists
+to avoid. If the digit panel and the walking-man icon share one integrated
+housing (common on combined pedestrian signal units), box the digit panel
+portion only, the same way a 3-lamp vehicle signal gets one box per lit
+lamp cell, not one box for the whole housing.
+
+**Unreadable digits:** if the numeral itself cannot be confidently read
+(distance, glare, motion blur, a digit mid-transition between two numbers),
+still box it as signal_countdown if you can tell with confidence that it
+*is* a lit countdown display -- the class only asserts "there is a
+countdown timer here", not "the timer reads N seconds". This differs from
+the signal_red/signal_green ambiguous-colour rule in section 2, because
+reporting the wrong colour is safety-relevant in the way this system uses
+it (feeds a SAFE/WAITING decision) while reporting the wrong digit is not,
+since (see below) this box is never used to read the actual number. If you
+cannot even tell it is a countdown display at all (looks like unlit glass,
+or too small to be sure it isn't noise), skip it, per section 4's minimum
+size rule and section 9's default.
+
+**CRITICAL — how a countdown interacts with the red/green rules, and with
+the FSM:** a countdown is information, not permission. Concretely:
+
+- **A countdown alone (no readable red/green signal in the same frame) is
+  NOT sufficient evidence for anything.** Do not treat a lone countdown as
+  implying "so the signal must be red" or "so the signal must be green" --
+  label only what is actually visible, per section 2's core rule (do not
+  guess a colour that was not shown). A countdown next to an ambiguous or
+  unlit lamp gets no colour label, same as section 2's existing rule for an
+  unlit or ambiguous lamp on its own.
+- **A countdown running down next to a green signal must NOT be read as
+  extending how long the system considers the road safe.** The intuitive
+  but wrong idea is "green with 8 seconds left is safer to start crossing
+  than green with 1 second left, so factor the countdown into the
+  crossing-time budget." This project's src/fsm.py deliberately does not
+  do that, and should not be extended to: fsm.py's _required_crossing_time()
+  already asks "is there enough time to walk this crossing", derived from
+  road width and walking speed (see fsm.py's own constants), not from how
+  long a light will stay green. A pedestrian countdown at a real
+  intersection describes the *vehicle* signal's timing in many
+  installations, not a promise about how long it is safe to be mid-crossing
+  once vehicles get a green in the cross direction -- treating it as a
+  safety extension would be trusting a signal-timing inference this project
+  has no way to verify, in the one system whose only hard rule is "a false
+  SAFE is unacceptable" (PLAN.md's ground rule). A countdown reaching zero
+  is, if anything, a reason for MORE caution (the phase is about to
+  change), never less.
+- **This document does not propose any new fsm.py rule that reads
+  signal_countdown at all**, safe or otherwise. See src/fsm.py's own
+  comments for where a *future*, carefully-scoped use might go (e.g.
+  refusing to start a fresh SAFE verdict when a countdown is very close to
+  zero, which is strictly more conservative and does not touch the
+  affirmative SAFE rule at all) -- but with zero training data for this
+  class, any such rule would be completely untestable today, so it stays a
+  comment, not code.
+
+## 9. When in doubt
 
 **If you cannot decide confidently within a few seconds, skip the box and
 move on.** A missing label costs the model some recall, which we can offset

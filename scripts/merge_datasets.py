@@ -44,6 +44,11 @@ import random
 import shutil
 from collections import defaultdict
 
+# signal_countdown (9) has zero boxed training data in any source this
+# script merges -- see PLAN.md's class table and data/LABELLING.md. It is
+# listed here anyway so nc/names in the written data.yaml always match the
+# other UNIFIED_NAMES copies exactly; a mismatched class list between files
+# silently shuffles every class.
 UNIFIED_NAMES = [
     "car",
     "bus",
@@ -54,6 +59,7 @@ UNIFIED_NAMES = [
     "crosswalk",
     "signal_red",
     "signal_green",
+    "signal_countdown",
 ]
 
 DEFAULT_SOURCES = [

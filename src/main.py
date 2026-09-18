@@ -247,6 +247,12 @@ def main():
     parser.add_argument("--headless", action="store_true", help="run without a display window")
     parser.add_argument("--max-frames", type=int, default=None, help="stop after this many frames")
     parser.add_argument(
+        "--imgsz",
+        type=int,
+        default=960,
+        help="inference resolution; must match the weights' training size (default 960)",
+    )
+    parser.add_argument(
         "--weights",
         default=None,
         help="path to YOLO weights; when given, run detection and draw boxes",
@@ -279,7 +285,7 @@ def main():
 
     cap, is_camera = open_source(args.video)
 
-    detector = Detector(args.weights) if args.weights else None
+    detector = Detector(args.weights, imgsz=args.imgsz) if args.weights else None
     # Audio only makes sense once there's a verdict to announce, which needs
     # a detector -- and only when the caller hasn't asked for --mute. This
     # keeps --headless + audio a supported combination on its own (the

@@ -61,9 +61,19 @@ Every dataset gets remapped to exactly these IDs. Nothing else.
 | 6 | crosswalk | Roboflow zebra crossing + our own footage |
 | 7 | signal_red | Roboflow + our own footage |
 | 8 | signal_green | Roboflow + our own footage |
+| 9 | signal_countdown | our own footage only (see note) |
 
 Classes 6-8 will be weak after Phase 2 and are mainly fixed by our own
 footage in Phase 4. That is expected. Do not try to fix it earlier.
+
+Class 9 (signal_countdown, added later than the rest of this table) is the
+numeric countdown timer many Indian signals show alongside the lamp. Be
+honest about it: as of adding this class, no public dataset we use carries
+boxed countdown-signal annotations (checked against Roboflow Universe), so
+this class trains to 0.0 mAP50 until our own Phase 4 footage supplies
+labelled examples -- exactly the same starting position signal_red/
+signal_green were in before Phase 3. See data/LABELLING.md for the proposed
+labelling and decision-interaction conventions.
 
 ---
 

@@ -13,6 +13,17 @@ always "wait". Only explicit positive evidence produces "safe to cross". A
 false SAFE is the only unacceptable failure mode, so every ambiguous case in
 this file resolves to WAITING, never to SAFE_TO_CROSS.
 
+ADDED RULE NOT IN PLAN.md's ORIGINAL TABLE: a vehicle turning into the
+crossing (safety.py's VehicleTracker.crossing_vehicles()) forces WAITING
+with its own reason string, checked right after signal_red and before
+anything that can emit SAFE. PLAN.md's Phase 6 table only reasons about
+min_ttc (a head-on closing-distance model), which cannot see a turning
+vehicle's real risk -- see safety.py's module docstring for why a turning
+vehicle can have a weak or absent TTC while still being the most dangerous
+case for a pedestrian. This is exactly the kind of real gap PLAN.md's rule
+table did not anticipate, so it is called out here rather than silently
+folded into an existing rule's reason string.
+
 STATES. PLAN.md names six: SEARCHING -> AT_CROSSING -> WAITING ->
 SAFE_TO_CROSS -> CROSSING -> DONE. The five decision rules PLAN.md actually
 specifies only ever emit three of them: SEARCHING, WAITING, SAFE_TO_CROSS.
@@ -94,6 +105,22 @@ POSITIVE_EVIDENCE_MIN_CONF = 0.6
 # a crosswalk sitting exactly on the centreline would flicker between
 # "slightly left" and "slightly right" on pixel noise alone.
 OFFSET_CENTRE_BAND = 0.1
+
+# --- signal_countdown (class 9) -- deliberately NOT read anywhere below ---
+# PLAN.md's class list has a signal_countdown class for numeric pedestrian
+# countdown timers (common at Indian crossings), but as of adding it there
+# is zero training data for it anywhere (see data/LABELLING.md section 8),
+# so no detection of this class can be trusted yet, and this module reads
+# none of its detections. Per data/LABELLING.md section 8: a countdown is
+# information, not permission -- it must never be used to grant SAFE, and a
+# countdown running down next to signal_green must never be read as
+# extending the time _road_is_clear()/_required_crossing_time() considers
+# safe. If a real, tested use is ever added, the only safe shape for it is
+# STRICTLY MORE CONSERVATIVE than today's rules, e.g. refusing to (re-)enter
+# SAFE_TO_CROSS when a countdown is detected very close to zero (the phase
+# is about to change) -- never a rule that grants or extends SAFE based on
+# a countdown value. With no labelled data to test either the detector or
+# such a rule against, it stays a comment, not code.
 
 
 @dataclass
@@ -209,7 +236,10 @@ class CrossingFSM:
         )
 
     def _decide(self, detections, tracker, frame_width):
-        """PLAN.md's five rules, in order. Returns
+        """PLAN.md's five rules, in order, plus one added rule (turning
+        vehicles -- see rule 3 below and the module docstring) inserted
+        between signal_red and the TTC check so it can never be bypassed by
+        the one rule that emits SAFE. Returns
         (raw_state, raw_reason, min_ttc, crosswalk_offset, crosswalk_direction)
         for THIS frame only -- no hysteresis applied here."""
         crosswalk_det = _best_detection(detections, "crosswalk", POSITIVE_EVIDENCE_MIN_CONF)
@@ -232,19 +262,39 @@ class CrossingFSM:
         if any(d.cls_name == "signal_red" for d in detections):
             return WAITING, "wait, signal is red", tracker.min_ttc(), offset, direction
 
+        # Rule 3 (added, not in PLAN.md's original five-rule table -- see
+        # module docstring): a vehicle turning into the crossing. This has
+        # to sit here, after signal_red and before anything that can emit
+        # SAFE, so nothing downstream can ever override it. safety.py's
+        # crossing_vehicles() is a separate signal from min_ttc(): a
+        # turning vehicle typically has WEAK box growth while it swings
+        # through the turn (see safety.py's module docstring), so it can
+        # have no TTC at all, or even read NOT_APPROACHING on growth alone,
+        # while still being the single most dangerous case for a
+        # pedestrian. It must not be treated as safe just because TTC has
+        # nothing to say about it.
+        if tracker.crossing_vehicles():
+            return (
+                WAITING,
+                "wait, vehicle turning across the crossing",
+                tracker.min_ttc(),
+                offset,
+                direction,
+            )
+
         min_ttc = tracker.min_ttc()
 
-        # Rule 3: a vehicle is close enough that PLAN.md's flat 5.0s
+        # Rule 4: a vehicle is close enough that PLAN.md's flat 5.0s
         # threshold alone says wait, regardless of anything else.
         if min_ttc is not None and min_ttc < DECISION_TTC_THRESHOLD:
             return WAITING, "wait, vehicle approaching", min_ttc, offset, direction
 
-        # Rule 4: green signal AND a road we can honestly call clear.
+        # Rule 5: green signal AND a road we can honestly call clear.
         signal_green = _best_detection(detections, "signal_green", POSITIVE_EVIDENCE_MIN_CONF)
         if signal_green is not None and self._road_is_clear(min_ttc, tracker.unresolved_vehicles()):
             return SAFE_TO_CROSS, "safe to cross now", min_ttc, offset, direction
 
-        # Rule 5: otherwise -- e.g. no signal detected at all, signal_green
+        # Rule 6: otherwise -- e.g. no signal detected at all, signal_green
         # too low-confidence to trust, or the road fails the crossing-time
         # or unresolved-vehicle check. PLAN.md's default is always "wait".
         return WAITING, "unclear, please wait", min_ttc, offset, direction

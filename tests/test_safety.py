@@ -24,6 +24,7 @@ from safety import (
     MIN_APPROACH_RATE,
     MIN_SAMPLES_FOR_TTC,
     DECISION_TTC_THRESHOLD,
+    CROSSING_NOISE_MARGIN,
     APPROACHING,
     NOT_APPROACHING,
     UNKNOWN,
@@ -386,12 +387,18 @@ def test_visible_receding_vehicle_with_full_window_is_not_approaching_not_unreso
     tracker = VehicleTracker()
     widths = [80.0, 70.0, 60.0, 50.0, 40.0]  # clearly receding
     timestamps = [0.0, 0.1, 0.2, 0.3, 0.4]
+    # centre_x pinned constant -- make_detection's default (x1=0, so centre
+    # drifts as width shrinks) would introduce an incidental lateral drift
+    # that is an artifact of the test helper's left-anchored box, not a real
+    # turning vehicle; this test is specifically about straight-line
+    # receding motion, so keep the centre fixed.
     for width, t in zip(widths, timestamps):
-        tracker.update([make_detection(width, track_id=1)], t)
+        tracker.update([make_detection(width, track_id=1, centre_x=0.0)], t)
 
     assert tracker.get_ttc(1) is None
     assert tracker.get_status(1) == NOT_APPROACHING
     assert tracker.unresolved_vehicles() == 0
+    assert tracker.tracks[1].is_crossing is False
 
 
 def test_parked_vehicle_settles_to_not_approaching_and_is_resolved():
@@ -646,3 +653,113 @@ def test_small_box_with_horizon_below_margin_is_unknown_not_not_approaching():
     assert tracker.get_status(1) == UNKNOWN
     assert tracker.get_ttc(1) is None
     assert tracker.unresolved_vehicles() == 1
+
+
+# ---------------------------------------------------------------------------
+# Lateral crossing: turning vehicles, scale-invariant, false-alarm guarded.
+# See safety.py's module docstring section on crossing_ratio/is_crossing.
+# ---------------------------------------------------------------------------
+
+def test_pure_lateral_motion_is_flagged_crossing_and_not_not_approaching():
+    # Box width never changes (no forward-growth signal at all -- the
+    # extreme case of a turning vehicle's weak approach signature), but the
+    # box centre sweeps sideways fast. Must be flagged as crossing, and
+    # must NOT settle to NOT_APPROACHING (that would read as safety
+    # evidence to fsm.py for the most dangerous real case).
+    tracker = VehicleTracker()
+    width = 100.0
+    centres = [0.0, 20.0, 40.0, 60.0, 80.0]  # 200 px/s of lateral drift
+    timestamps = [0.0, 0.1, 0.2, 0.3, 0.4]
+    for centre_x, t in zip(centres, timestamps):
+        tracker.update([make_detection(width, track_id=1, centre_x=centre_x)], t)
+
+    assert tracker.tracks[1].is_crossing is True
+    assert tracker.get_status(1) == UNKNOWN, (
+        "a lateral-drifting vehicle with flat box growth must read UNKNOWN, "
+        "never NOT_APPROACHING"
+    )
+    assert tracker.crossing_vehicles() == [tracker.tracks[1]]
+
+
+def test_head_on_approach_no_lateral_drift_is_not_flagged_crossing():
+    # Box grows (approaching head-on), centre stays put -- classic
+    # non-turning approach. Should be APPROACHING and NOT flagged crossing.
+    tracker = VehicleTracker()
+    widths = [30.0, 45.0, 60.0, 75.0, 90.0]
+    timestamps = [0.0, 0.1, 0.2, 0.3, 0.4]
+    for width, t in zip(widths, timestamps):
+        tracker.update([make_detection(width, track_id=1, centre_x=0.0)], t)
+
+    assert tracker.get_status(1) == APPROACHING
+    assert tracker.tracks[1].is_crossing is False
+    assert tracker.crossing_vehicles() == []
+
+
+def test_approaching_and_drifting_is_flagged_crossing_and_still_approaching():
+    # Both signals present: real box growth AND real lateral drift. Status
+    # should still reflect the real TTC assessment (APPROACHING, additive
+    # information, not a replacement), while also being flagged as
+    # crossing -- fsm.py is expected to treat this as strictly more
+    # dangerous than either signal alone by having both available.
+    tracker = VehicleTracker()
+    widths = [30.0, 45.0, 60.0, 75.0, 90.0]
+    centres = [0.0, 20.0, 40.0, 60.0, 80.0]
+    timestamps = [0.0, 0.1, 0.2, 0.3, 0.4]
+    for width, centre_x, t in zip(widths, centres, timestamps):
+        tracker.update([make_detection(width, track_id=1, centre_x=centre_x)], t)
+
+    assert tracker.get_status(1) == APPROACHING
+    assert tracker.get_ttc(1) is not None
+    assert tracker.tracks[1].is_crossing is True
+    assert tracker.crossing_vehicles() == [tracker.tracks[1]]
+
+
+def test_parked_vehicle_jitter_is_not_flagged_crossing():
+    # Same false-alarm guard the TTC path already has, applied to lateral
+    # drift: a parked vehicle's box centre wobbles by a pixel or two frame
+    # to frame. That must not read as "crossing" -- CROSSING_NOISE_MARGIN
+    # times the jitter noise floor exists exactly to reject this.
+    tracker = VehicleTracker()
+    width = 100.0
+    centres = [50.0, 49.0, 51.0, 50.0, 49.5]  # noisy around ~49.9, no trend
+    timestamps = [0.0, 0.1, 0.2, 0.3, 0.4]
+    for centre_x, t in zip(centres, timestamps):
+        tracker.update([make_detection(width, track_id=1, centre_x=centre_x)], t)
+
+    assert tracker.tracks[1].is_crossing is False
+    assert tracker.crossing_vehicles() == []
+
+
+def test_crossing_ratio_is_scale_invariant():
+    # The same real-world sideways speed relative to vehicle size should
+    # give the same verdict (and same ratio) at two very different box
+    # sizes. Drift is scaled proportionally to width here: 2.0 widths/sec
+    # in both cases.
+    timestamps = [0.0, 0.1, 0.2, 0.3, 0.4]
+
+    small_tracker = VehicleTracker()
+    small_width = 50.0
+    small_centres = [i * small_width * 2.0 * 0.1 for i in range(5)]  # 100 px/s
+    for centre_x, t in zip(small_centres, timestamps):
+        small_tracker.update([make_detection(small_width, track_id=1, centre_x=centre_x)], t)
+
+    large_tracker = VehicleTracker()
+    large_width = 500.0
+    large_centres = [i * large_width * 2.0 * 0.1 for i in range(5)]  # 1000 px/s
+    for centre_x, t in zip(large_centres, timestamps):
+        large_tracker.update([make_detection(large_width, track_id=1, centre_x=centre_x)], t)
+
+    assert small_tracker.tracks[1].is_crossing is True
+    assert large_tracker.tracks[1].is_crossing is True
+    assert small_tracker.get_crossing_ratio(1) == pytest.approx(
+        large_tracker.get_crossing_ratio(1), rel=1e-6
+    )
+
+
+def test_crossing_ratio_none_until_enough_samples():
+    tracker = VehicleTracker()
+    tracker.update([make_detection(100.0, track_id=1, centre_x=0.0)], 0.0)
+    tracker.update([make_detection(100.0, track_id=1, centre_x=50.0)], 0.1)
+    assert tracker.get_crossing_ratio(1) is None
+    assert tracker.tracks[1].is_crossing is False
+    assert tracker.crossing_vehicles() == []

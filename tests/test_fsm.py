@@ -38,18 +38,26 @@ def make_detection(cls_name, conf=0.9, x1=40.0, x2=60.0, y1=0.0, y2=20.0):
 
 
 class FakeTracker:
-    """Stand-in for safety.VehicleTracker, honest to the only two methods
-    fsm.py actually calls on it: min_ttc() and unresolved_vehicles()."""
+    """Stand-in for safety.VehicleTracker, honest to the three methods
+    fsm.py actually calls on it: min_ttc(), unresolved_vehicles() and
+    crossing_vehicles()."""
 
-    def __init__(self, min_ttc=None, unresolved=0):
+    def __init__(self, min_ttc=None, unresolved=0, crossing=None):
         self._min_ttc = min_ttc
         self._unresolved = unresolved
+        # A plain list stand-in for the TrackState objects
+        # safety.VehicleTracker.crossing_vehicles() returns -- fsm.py only
+        # ever checks truthiness, so the contents don't matter here.
+        self._crossing = crossing if crossing is not None else []
 
     def min_ttc(self):
         return self._min_ttc
 
     def unresolved_vehicles(self):
         return self._unresolved
+
+    def crossing_vehicles(self):
+        return self._crossing
 
 
 CROSSWALK_CENTRE = make_detection("crosswalk", conf=0.9, x1=90.0, x2=110.0)  # centred in a 200px frame
@@ -231,6 +239,9 @@ def test_tracker_exception_yields_waiting_not_a_crash_not_safe():
     fsm = CrossingFSM()
 
     class ExplodingTracker:
+        def crossing_vehicles(self):
+            return []
+
         def min_ttc(self):
             raise RuntimeError("simulated tracker failure")
 
@@ -273,3 +284,66 @@ def test_crosswalk_offset_centre():
     verdict = fsm.update([CROSSWALK_CENTRE], tracker, FRAME_WIDTH)
     assert abs(verdict.crosswalk_offset) <= 0.1
     assert verdict.crosswalk_direction == "center"
+
+
+# ---------------------------------------------------------------------------
+# Turning-vehicle rule (safety.py's crossing_vehicles()): forces WAITING
+# with its own reason, and cannot be bypassed by the SAFE rule.
+# ---------------------------------------------------------------------------
+
+def test_crossing_vehicle_forces_waiting_even_with_green_and_clear_road():
+    fsm = CrossingFSM()
+    # A textbook-otherwise-safe road (no TTC, nothing unresolved, green
+    # signal) except a vehicle flagged as crossing the path.
+    tracker = FakeTracker(min_ttc=None, unresolved=0, crossing=["some_track"])
+    verdict = fsm.update([CROSSWALK_CENTRE, SIGNAL_GREEN], tracker, FRAME_WIDTH)
+    assert verdict.raw_state == WAITING
+    assert verdict.raw_reason == "wait, vehicle turning across the crossing"
+
+
+def test_crossing_vehicle_beats_safe_regardless_of_detection_order():
+    fsm = CrossingFSM()
+    tracker = FakeTracker(min_ttc=None, unresolved=0, crossing=["some_track"])
+    detections = [SIGNAL_GREEN, CROSSWALK_CENTRE]
+    verdict = fsm.update(detections, tracker, FRAME_WIDTH)
+    assert verdict.raw_state == WAITING
+    assert verdict.raw_reason == "wait, vehicle turning across the crossing"
+
+
+def test_fsm_never_returns_safe_while_crossing_vehicle_present():
+    fsm = CrossingFSM()
+    tracker = FakeTracker(min_ttc=None, unresolved=0, crossing=["some_track"])
+    detections = [CROSSWALK_CENTRE, SIGNAL_GREEN]
+
+    # Run well past the hysteresis window -- SAFE must never appear, in
+    # either raw or committed form, the whole time a crossing vehicle is
+    # present (same style as the red-light invariant test above).
+    for _ in range(HYSTERESIS_FRAMES + 10):
+        verdict = fsm.update(detections, tracker, FRAME_WIDTH)
+        assert verdict.raw_state != SAFE_TO_CROSS
+        assert verdict.state != SAFE_TO_CROSS
+    assert verdict.state == WAITING
+    assert verdict.reason == "wait, vehicle turning across the crossing"
+
+
+def test_crossing_vehicle_does_not_block_searching_when_no_crosswalk():
+    # Rule 1 (no crosswalk -> SEARCHING) still runs first -- a crossing
+    # vehicle detected with no crosswalk in view has nothing to be "waiting
+    # to cross" about yet.
+    fsm = CrossingFSM()
+    tracker = FakeTracker(min_ttc=None, unresolved=0, crossing=["some_track"])
+    verdict = fsm.update([SIGNAL_GREEN], tracker, FRAME_WIDTH)
+    assert verdict.raw_state == SEARCHING
+
+
+def test_red_light_reason_still_wins_over_crossing_reason():
+    # signal_red (rule 2) is checked before the crossing rule (rule 3), so
+    # when both are true the red-light reason is reported -- this doesn't
+    # change what fsm.py does (both are WAITING), just documents which
+    # reason string surfaces, matching the fixed rule order in the module
+    # docstring.
+    fsm = CrossingFSM()
+    tracker = FakeTracker(min_ttc=None, unresolved=0, crossing=["some_track"])
+    verdict = fsm.update([CROSSWALK_CENTRE, SIGNAL_RED], tracker, FRAME_WIDTH)
+    assert verdict.raw_state == WAITING
+    assert verdict.raw_reason == "wait, signal is red"
