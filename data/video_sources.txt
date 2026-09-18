@@ -32,3 +32,19 @@
 # Example lines (commented out -- these are not real entries):
 # https://www.youtube.com/watch?v=XXXXXXXXXXX   # signal_red, daytime junction
 # https://www.youtube.com/watch?v=YYYYYYYYYYY   # night footage, wet road
+
+# ---------------------------------------------------------------------
+# Phase 4 supplementary footage, added 2026-09-18.
+# Creative Commons (from YouTube's CC filter) -- safe to cite and reuse:
+https://www.youtube.com/watch?v=11ARAj8vGh0   # Crossing the road in Mumbai, 24s
+https://www.youtube.com/watch?v=PtbwIaCcNvY   # Crossing the street in Mumbai, 17s
+https://www.youtube.com/watch?v=k2oy_wTM0yw   # Traffic Signal, Amritsar, 13s
+https://www.youtube.com/watch?v=iEIk3RpV6RA   # Indian traffic congestion, 97s
+https://www.youtube.com/watch?v=qDwcV8deQTI   # Mumbai walking tour IRL, 4m
+https://www.youtube.com/watch?v=nMlUr3H08jA   # Mumbai daily life walking, 17m
+# Standard YouTube Licence -- NOT Creative Commons. Downloaded at the
+# team's decision for experimentation. Check before republishing any
+# frame from these, and see data/video_manifest.json for the recorded
+# licence of each.
+https://www.youtube.com/watch?v=K3TgjZ5KErg   # Walking New Delhi, traffic, 22m
+https://www.youtube.com/watch?v=9d8szg8LqV0   # Walking New Delhi 4K, 36m

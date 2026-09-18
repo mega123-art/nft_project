@@ -33,6 +33,15 @@ DEFAULT_OUTPUT_DIR = "data/raw_videos"
 DEFAULT_MANIFEST = "data/video_manifest.json"
 
 
+def _ffmpeg_path():
+    """Locate an ffmpeg binary without requiring a system install."""
+    try:
+        import imageio_ffmpeg
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:
+        return None
+
+
 def read_urls_from_file(path):
     """One URL per line, '#' starts a comment (whole-line or trailing)."""
     if not os.path.isfile(path):
@@ -123,10 +132,19 @@ def download_one(url, output_dir, manifest, force):
     outtmpl = os.path.join(output_dir, "%(id)s.%(ext)s")
 
     ydl_opts = {
-        # cap at 1080p, prefer a pre-merged mp4 if the site offers one,
-        # otherwise take the best video+audio under the cap and merge
-        "format": "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/best[height<=1080]",
-        "merge_output_format": "mp4",
+        # Video only, capped at 1080p, and no audio track at all.
+        #
+        # We extract still frames from these clips; the soundtrack is dead
+        # weight. It also avoids a hard dependency: YouTube serves its
+        # higher qualities as separate video and audio streams, and asking
+        # for both makes yt-dlp merge them with ffmpeg, which is not
+        # installed here (same gap that makes extract_frames.py use
+        # OpenCV). Requesting a single video-only stream needs no merge.
+        # ffmpeg comes from the imageio-ffmpeg wheel rather than the system
+        # package, so no root access is needed to merge YouTube's separate
+        # video and audio streams. Falls back to whatever is on PATH.
+        "ffmpeg_location": _ffmpeg_path(),
+        "format": "bestvideo[height<=1080][ext=mp4]/bestvideo[height<=1080]/best[height<=1080][ext=mp4]/best[height<=1080]",
         "outtmpl": outtmpl,
         "quiet": True,
         "no_warnings": True,

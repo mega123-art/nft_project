@@ -1,0 +1,62 @@
+[
+  {
+    "url": "https://www.youtube.com/watch?v=11ARAj8vGh0",
+    "video_id": "11ARAj8vGh0",
+    "title": "Crossing the road in Mumbai",
+    "uploader": "casparia",
+    "upload_date": "20171015",
+    "licence": "Creative Commons Attribution license (reuse allowed)",
+    "duration_seconds": 20,
+    "resolution": "640x480",
+    "filename": "data/raw_videos/11ARAj8vGh0.mp4",
+    "downloaded_at": "2026-09-18T10:43:56"
+  },
+  {
+    "url": "https://www.youtube.com/watch?v=PtbwIaCcNvY",
+    "video_id": "PtbwIaCcNvY",
+    "title": "Crossing the street in Mumbai",
+    "uploader": "Kullnark",
+    "upload_date": "20120831",
+    "licence": "Creative Commons Attribution license (reuse allowed)",
+    "duration_seconds": 17,
+    "resolution": "1920x1080",
+    "filename": "data/raw_videos/PtbwIaCcNvY.mp4",
+    "downloaded_at": "2026-09-18T10:44:00"
+  },
+  {
+    "url": "https://www.youtube.com/watch?v=k2oy_wTM0yw",
+    "video_id": "k2oy_wTM0yw",
+    "title": "Traiffic Signal Amritsar City : No Copyright Video | First Footage",
+    "uploader": "First Footage",
+    "upload_date": "20230403",
+    "licence": "Creative Commons Attribution license (reuse allowed)",
+    "duration_seconds": 13,
+    "resolution": "1920x1080",
+    "filename": "data/raw_videos/k2oy_wTM0yw.mp4",
+    "downloaded_at": "2026-09-18T10:44:04"
+  },
+  {
+    "url": "https://www.youtube.com/watch?v=iEIk3RpV6RA",
+    "video_id": "iEIk3RpV6RA",
+    "title": "CRAZY INDIAN TRAFFIC CONGESTION",
+    "uploader": "Sound Spirit",
+    "upload_date": "20120319",
+    "licence": "Creative Commons Attribution license (reuse allowed)",
+    "duration_seconds": 97,
+    "resolution": "1920x1080",
+    "filename": "data/raw_videos/iEIk3RpV6RA.mp4",
+    "downloaded_at": "2026-09-18T10:44:11"
+  },
+  {
+    "url": "https://www.youtube.com/watch?v=qDwcV8deQTI",
+    "video_id": "qDwcV8deQTI",
+    "title": "IRL Stream | Mumbai, India Walking Tour \ud83c\uddee\ud83c\uddf3",
+    "uploader": "CutAddShort",
+    "upload_date": "20250214",
+    "licence": "Creative Commons Attribution license (reuse allowed)",
+    "duration_seconds": 259,
+    "resolution": "480x854",
+    "filename": "data/raw_videos/qDwcV8deQTI.mp4",
+    "downloaded_at": "2026-09-18T10:44:25"
+  }
+]
