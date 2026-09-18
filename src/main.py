@@ -19,6 +19,7 @@ import cv2
 from detector import Detector
 from safety import VehicleTracker, APPROACHING, UNKNOWN
 from fsm import CrossingFSM, SAFE_TO_CROSS, WAITING
+from audio import AudioAnnouncer
 
 
 def open_source(source_arg):
@@ -124,7 +125,7 @@ def draw_verdict(frame, verdict):
         )
 
 
-def run(cap, headless, max_frames, detector, save_frames_dir=None, save_frames_every=15):
+def run(cap, headless, max_frames, detector, save_frames_dir=None, save_frames_every=15, announcer=None):
     """Read frames until the source ends, max_frames is hit, or 'q' is pressed.
 
     When detector is None this is the plain Phase 0 loop, unchanged. When a
@@ -137,6 +138,11 @@ def run(cap, headless, max_frames, detector, save_frames_dir=None, save_frames_e
     save_frames_every frames (capped at 3 total) -- used to produce the
     Phase 6 "done" check screenshots without touching the report/
     generation scripts under scripts/.
+
+    announcer, when given (Phase 7, requires detector), gets every frame's
+    verdict handed to it. AudioAnnouncer itself decides whether a given
+    frame is worth speaking -- see audio.py -- and never blocks this loop:
+    speech runs on its own thread, and announce() never raises.
     """
     frame_count = 0
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -172,6 +178,9 @@ def run(cap, headless, max_frames, detector, save_frames_dir=None, save_frames_e
             draw_detections(frame, detections, tracker)
             draw_min_ttc(frame, tracker.min_ttc())
             draw_verdict(frame, verdict)
+
+            if announcer is not None:
+                announcer.announce(verdict)
 
             if (
                 save_frames_dir is not None
@@ -223,11 +232,22 @@ def main():
         help="save up to 3 annotated frames (state + reason drawn) to this "
         "directory, for phase done-check screenshots; requires --weights",
     )
+    parser.add_argument(
+        "--mute",
+        action="store_true",
+        help="disable Phase 7 audio (speech + earcons) even when --weights is given; "
+        "useful for testing the video path silently",
+    )
     args = parser.parse_args()
 
     cap, is_camera = open_source(args.video)
 
     detector = Detector(args.weights) if args.weights else None
+    # Audio only makes sense once there's a verdict to announce, which needs
+    # a detector -- and only when the caller hasn't asked for --mute. This
+    # keeps --headless + audio a supported combination on its own (the
+    # window is optional, the announcer is not tied to it).
+    announcer = AudioAnnouncer() if (detector is not None and not args.mute) else None
 
     max_frames = args.max_frames
     # A live camera never hits end-of-stream on its own. Without a display
@@ -239,7 +259,14 @@ def main():
         print("note: headless camera capture, stopping after 300 frames (override with --max-frames)")
 
     try:
-        run(cap, args.headless, max_frames, detector, save_frames_dir=args.save_frames)
+        run(
+            cap,
+            args.headless,
+            max_frames,
+            detector,
+            save_frames_dir=args.save_frames,
+            announcer=announcer,
+        )
     finally:
         cap.release()
         if not args.headless:
@@ -247,6 +274,10 @@ def main():
             # OpenCV build without GUI support raises, which would turn a
             # clean headless run into a crash for no reason.
             cv2.destroyAllWindows()
+        if announcer is not None:
+            # Prompt, bounded shutdown -- see audio.py's close(): a daemon
+            # thread plus a joined sentinel, so this can never hang exit.
+            announcer.close()
 
 
 if __name__ == "__main__":
