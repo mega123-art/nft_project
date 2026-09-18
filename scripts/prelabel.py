@@ -81,12 +81,12 @@ def label_path_for(image_path, frames_dir, out_dir):
     return os.path.join(out_dir, rel_txt)
 
 
-def prelabel_image(model, image_path, label_path, conf, class_names):
+def prelabel_image(model, image_path, label_path, conf, class_names, imgsz):
     """Run detection on one image, write its YOLO label file, return the
     list of class names detected in it (possibly empty)."""
     os.makedirs(os.path.dirname(label_path), exist_ok=True)
 
-    results = model.predict(image_path, conf=conf, verbose=False)
+    results = model.predict(image_path, conf=conf, imgsz=imgsz, verbose=False)
     result = results[0]
     boxes = result.boxes
 
@@ -127,6 +127,22 @@ def main():
     parser.add_argument("--weights", default="models/best.pt", help="model weights (default models/best.pt)")
     parser.add_argument("--conf", type=float, default=0.3, help="confidence threshold (default 0.3, per PLAN.md)")
     parser.add_argument(
+        "--imgsz",
+        type=int,
+        default=1280,
+        help=(
+            "inference resolution (default 1280, NOT the training default of 640). Measured on "
+            "this footage: a signal head is roughly 20px wide in a 1080p frame. At imgsz=640 the "
+            "model finds almost no signals (2 detections on a test clip, best conf 0.52, missing "
+            "an obvious red lamp mid-frame). At imgsz=1280 it finds 6, best conf 0.74; at 1920, "
+            "0.82. Cost is 91-110ms/frame at 1280 vs 47ms at 640 on CPU -- worth paying here "
+            "because this script's whole point is pre-labelling signals well enough to save "
+            "labeller time; train.py stays at imgsz=640 since letterboxing every training image "
+            "up to 1280 would blow up training time for a gain this script does not need "
+            "(training sees the whole dataset repeatedly, not one pass)."
+        ),
+    )
+    parser.add_argument(
         "--out-dir",
         default=None,
         help="where to write .txt labels (default: next to each image, inside frames_dir)",
@@ -157,10 +173,10 @@ def main():
     per_class_totals = {name: 0 for name in class_names}
     zero_detection_count = 0
 
-    print(f"\nrunning {args.weights} at conf={args.conf} over {len(images)} frames...")
+    print(f"\nrunning {args.weights} at conf={args.conf} imgsz={args.imgsz} over {len(images)} frames...")
     for image_path in images:
         label_path = label_path_for(image_path, args.frames_dir, out_dir)
-        detected_names = prelabel_image(model, image_path, label_path, args.conf, class_names)
+        detected_names = prelabel_image(model, image_path, label_path, args.conf, class_names, args.imgsz)
 
         if not detected_names:
             zero_detection_count += 1
