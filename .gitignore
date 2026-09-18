@@ -8,6 +8,11 @@ data/*
 !data/LABELLING.md
 !data/video_sources.txt
 !data/video_manifest.json
+# Phase 8 ground-truth annotations (frame-range safe/unsafe labels, TTC
+# observations) are small, hand-written CSVs -- documents, same reasoning
+# as LABELLING.md above, not the bulk data data/* otherwise hides.
+!data/ground_truth/
+!data/ground_truth/**
 models/*.pt
 logs/
 runs/

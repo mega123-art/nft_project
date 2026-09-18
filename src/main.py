@@ -20,6 +20,7 @@ from detector import Detector
 from safety import VehicleTracker, APPROACHING, UNKNOWN
 from fsm import CrossingFSM, SAFE_TO_CROSS, WAITING
 from audio import AudioAnnouncer
+from decision_log import DecisionLogger, DEFAULT_DB_PATH
 
 
 def open_source(source_arg):
@@ -125,7 +126,8 @@ def draw_verdict(frame, verdict):
         )
 
 
-def run(cap, headless, max_frames, detector, save_frames_dir=None, save_frames_every=15, announcer=None):
+def run(cap, headless, max_frames, detector, save_frames_dir=None, save_frames_every=15,
+        announcer=None, decision_logger=None, video_source=None):
     """Read frames until the source ends, max_frames is hit, or 'q' is pressed.
 
     When detector is None this is the plain Phase 0 loop, unchanged. When a
@@ -143,6 +145,11 @@ def run(cap, headless, max_frames, detector, save_frames_dir=None, save_frames_e
     verdict handed to it. AudioAnnouncer itself decides whether a given
     frame is worth speaking -- see audio.py -- and never blocks this loop:
     speech runs on its own thread, and announce() never raises.
+
+    decision_logger, when given (Phase 8, requires detector), gets every
+    frame's verdict + detections handed to it for logs/decisions.db. Like
+    announcer, it never blocks this loop beyond a queue put and never
+    raises -- see decision_log.py.
     """
     frame_count = 0
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -170,9 +177,11 @@ def run(cap, headless, max_frames, detector, save_frames_dir=None, save_frames_e
         frame_count += 1
 
         if detector is not None:
-            infer_start = time.time()
+            frame_start = time.time()
+            infer_start = frame_start
             detections = detector.detect(frame)
-            inference_times.append(time.time() - infer_start)
+            inference_s = time.time() - infer_start
+            inference_times.append(inference_s)
             tracker.update(detections, infer_start)
             verdict = fsm.update(detections, tracker, width)
             draw_detections(frame, detections, tracker)
@@ -181,6 +190,23 @@ def run(cap, headless, max_frames, detector, save_frames_dir=None, save_frames_e
 
             if announcer is not None:
                 announcer.announce(verdict)
+
+            if decision_logger is not None:
+                # total_ms covers frame capture through here -- the point
+                # audio.announce() has (or hasn't) already been kicked off
+                # above -- which is PLAN.md's "capture to audio start"
+                # latency. announce() itself only ever enqueues (see
+                # audio.py), so this is measured, not merely assumed, to be
+                # representative of that latency.
+                total_ms = 1000.0 * (time.time() - frame_start)
+                decision_logger.log(
+                    frame_count,
+                    verdict,
+                    tracker.unresolved_vehicles(),
+                    detections,
+                    inference_ms=1000.0 * inference_s,
+                    total_ms=total_ms,
+                )
 
             if (
                 save_frames_dir is not None
@@ -238,6 +264,17 @@ def main():
         help="disable Phase 7 audio (speech + earcons) even when --weights is given; "
         "useful for testing the video path silently",
     )
+    parser.add_argument(
+        "--log-db",
+        default=DEFAULT_DB_PATH,
+        metavar="PATH",
+        help=f"Phase 8 decision-log SQLite path (default: {DEFAULT_DB_PATH})",
+    )
+    parser.add_argument(
+        "--no-log",
+        action="store_true",
+        help="disable Phase 8 decision logging even when --weights is given",
+    )
     args = parser.parse_args()
 
     cap, is_camera = open_source(args.video)
@@ -248,6 +285,16 @@ def main():
     # keeps --headless + audio a supported combination on its own (the
     # window is optional, the announcer is not tied to it).
     announcer = AudioAnnouncer() if (detector is not None and not args.mute) else None
+    # Same shape as the announcer: only makes sense with a detector (there
+    # is no verdict to log without one), and only when not explicitly
+    # disabled. A construction failure (bad path, disk full, ...) degrades
+    # to a warning inside DecisionLogger itself, never a crash here.
+    video_source_name = args.video if args.video is not None else "camera 0"
+    decision_logger = (
+        DecisionLogger(db_path=args.log_db, video_source=video_source_name)
+        if (detector is not None and not args.no_log)
+        else None
+    )
 
     max_frames = args.max_frames
     # A live camera never hits end-of-stream on its own. Without a display
@@ -266,6 +313,8 @@ def main():
             detector,
             save_frames_dir=args.save_frames,
             announcer=announcer,
+            decision_logger=decision_logger,
+            video_source=video_source_name,
         )
     finally:
         cap.release()
@@ -278,6 +327,10 @@ def main():
             # Prompt, bounded shutdown -- see audio.py's close(): a daemon
             # thread plus a joined sentinel, so this can never hang exit.
             announcer.close()
+        if decision_logger is not None:
+            # Same bounded-shutdown shape -- flush the writer thread's
+            # remaining batch and stop it, without risking a hang on exit.
+            decision_logger.close()
 
 
 if __name__ == "__main__":
