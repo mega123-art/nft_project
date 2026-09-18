@@ -53,6 +53,38 @@ NAME_TO_UNIFIED = {
     "Person": "person",
     "Zebra Crossing": "crosswalk",
     "Zebra-Crossing": "crosswalk",
+
+    # --- Phase 3: signal-colour datasets (group-e, traffic-light-detection,
+    # traffic-si0cm) --- all Red* variants (including amber/yellow) map to
+    # signal_red, all Green* variants map to signal_green. "off" (an unlit
+    # lamp) is deliberately NOT in this table at all, so it is dropped by
+    # the same "unmapped name -> dropped" path as everything else -- see
+    # data/LABELLING.md section 2: an unlit signal gives no evidence and
+    # must not be labelled a colour.
+    "Red": "signal_red",
+    "RedLeft": "signal_red",
+    "RedRight": "signal_red",
+    "RedStraight": "signal_red",
+    "RedStraightLeft": "signal_red",
+    "Red Light": "signal_red",
+    "Red-Light": "signal_red",  # defensive: not the real export name (see download_signal_datasets.py),
+                                 # kept in case a future re-export uses it.
+    # Amber/Yellow -> signal_red, NOT a third class and NOT signal_green.
+    # This is deliberate, not a copy-paste mistake: data/LABELLING.md
+    # section 2 rules that amber means "traffic may still be moving" and
+    # must be treated as the conservative (red) case, because a false SAFE
+    # is the one failure mode this whole project cannot tolerate.
+    "Yellow": "signal_red",
+    "Yellow Light": "signal_red",
+    "Yellow-Light": "signal_red",  # defensive, see Red-Light note above
+    "Green": "signal_green",
+    "GreenLeft": "signal_green",
+    "GreenRight": "signal_green",
+    "GreenStraight": "signal_green",
+    "GreenStraightLeft": "signal_green",
+    "GreenStraightRight": "signal_green",
+    "Green Light": "signal_green",
+    "Green-Light": "signal_green",  # defensive, see Red-Light note above
 }
 # Everything else in the Indian dataset's real (v2) 48-class list is dropped
 # on purpose: Traffic Signal (no red/green colour info, so it's useless for

@@ -40,6 +40,32 @@ three thresholds, then filters by confidence in Python for the higher
 ones -- it is a fast approximation (NMS itself is not exactly recomputed
 per threshold) good enough for a sensitivity check, not a substitute for
 actually rerunning at a different --conf if you change the default.
+
+--- --only-classes and --cross-class-iou (the indian_roads bus fix) ---
+indian_roads is a different situation from zebra_crossing: it already has
+GOOD human labels for car/truck/motorcycle/autorickshaw/person, it is just
+missing most bus boxes (buses are in the photos, they were not annotated --
+see PLAN.md/the task notes: v2 has 6 bus annotations where the same
+underlying images' v7 export had 699). Running the normal full pseudo-label
+pass on it would be wrong twice over: it would add car/motorcycle boxes on
+top of already-correctly-labelled ones (same-class IoU dedup would mostly
+catch that, but not always), AND it has no way to avoid COCO mislabelling a
+correctly human-boxed autorickshaw as "car" or "motorcycle" (COCO has no
+autorickshaw class, so an autorickshaw is exactly the kind of object a COCO
+model gets wrong) and stacking a second, wrong box on top of a correct one.
+
+--only-classes restricts which unified classes this run is even allowed to
+propose (e.g. --only-classes bus), so a bus-only run cannot touch car/
+motorcycle/person/truck at all, no matter what COCO detects in the image.
+
+--cross-class-iou, when given, replaces the same-class-only dedup check
+with a cross-class one: a candidate pseudo box is skipped if it overlaps an
+EXISTING box of ANY class above this IoU, not just an existing box of the
+same class. This is what actually protects an existing autorickshaw label:
+a COCO "car" guess landing on top of a human-drawn "autorickshaw" box has
+different class IDs, so plain same-class dedup would never catch it, but a
+cross-class IoU check does. Existing behaviour (same-class dedup only) is
+unchanged when --cross-class-iou is not passed, so this is additive.
 """
 
 import argparse
@@ -194,11 +220,29 @@ def detect_raw(model, image_path, min_conf):
     return detections
 
 
-def filter_and_dedup(raw_detections, existing_boxes, conf_threshold, iou_dedup):
+def filter_only_classes(raw_detections, only_class_ids):
+    """Drop any detection whose unified class id is not in only_class_ids.
+    only_class_ids of None means no restriction (the normal, pre-existing
+    behaviour)."""
+    if only_class_ids is None:
+        return raw_detections
+    return [d for d in raw_detections if d[0] in only_class_ids]
+
+
+def filter_and_dedup(raw_detections, existing_boxes, conf_threshold, iou_dedup, cross_class_iou=None):
     """Given raw detections (already at some low conf) and an image's
-    existing boxes, apply a confidence threshold and skip anything whose
-    IoU with an existing box of the SAME class exceeds iou_dedup. Returns
-    (kept, n_skipped_iou)."""
+    existing boxes, apply a confidence threshold and skip duplicates.
+
+    Default (cross_class_iou is None): a candidate is a duplicate if its
+    IoU with an existing box of the SAME class exceeds iou_dedup -- the
+    original zebra_crossing-style behaviour.
+
+    With cross_class_iou set: a candidate is a duplicate if its IoU with an
+    EXISTING box of ANY class exceeds cross_class_iou. This is stricter and
+    is what the indian_roads bus fix uses, so a pseudo bus box is never
+    stacked on top of a correctly human-labelled car/autorickshaw/etc.
+
+    Returns (kept, n_skipped)."""
     kept = []
     n_skipped = 0
     for cls_id, box, conf in raw_detections:
@@ -206,7 +250,11 @@ def filter_and_dedup(raw_detections, existing_boxes, conf_threshold, iou_dedup):
             continue
         duplicate = False
         for ex_cls_id, ex_box in existing_boxes:
-            if ex_cls_id == cls_id and iou(box, ex_box) > iou_dedup:
+            if cross_class_iou is not None:
+                if iou(box, ex_box) > cross_class_iou:
+                    duplicate = True
+                    break
+            elif ex_cls_id == cls_id and iou(box, ex_box) > iou_dedup:
                 duplicate = True
                 break
         if duplicate:
@@ -248,8 +296,39 @@ def main():
         default=0.5,
         help="skip a pseudo box whose IoU with an existing same-class box exceeds this (default 0.5)",
     )
+    parser.add_argument(
+        "--only-classes",
+        nargs="+",
+        default=None,
+        metavar="CLASS_NAME",
+        help=(
+            "restrict pseudo-labels to these unified class names only (e.g. --only-classes bus). "
+            "Default: no restriction, all of COCO_TO_UNIFIED is eligible. Use this on a dataset "
+            "that already has good human labels for some classes, so this run cannot touch them."
+        ),
+    )
+    parser.add_argument(
+        "--cross-class-iou",
+        type=float,
+        default=None,
+        help=(
+            "if set, skip a pseudo box whose IoU with an EXISTING box of ANY class (not just the "
+            "same class) exceeds this. Stricter than --iou-dedup; use this together with "
+            "--only-classes when adding one class on top of a dataset with good labels for others, "
+            "so a pseudo box never lands on top of a correctly-labelled object of a different class."
+        ),
+    )
     parser.add_argument("--dry-run", action="store_true", help="report what would be added without changing anything")
     args = parser.parse_args()
+
+    only_class_ids = None
+    if args.only_classes is not None:
+        only_class_ids = set()
+        for name in args.only_classes:
+            if name not in UNIFIED_NAMES:
+                print(f"error: --only-classes got {name!r}, not one of the unified class names: {UNIFIED_NAMES}")
+                raise SystemExit(1)
+            only_class_ids.add(UNIFIED_NAMES.index(name))
 
     marker_path = os.path.join(args.dataset_dir, MARKER_NAME)
     if not args.dry_run and os.path.isfile(marker_path):
@@ -278,6 +357,11 @@ def main():
 
     coco_wanted = sorted(set(COCO_TO_UNIFIED))
     print(f"keeping only COCO classes: {coco_wanted} (everything else COCO detects is discarded)")
+    if only_class_ids is not None:
+        only_names = [UNIFIED_NAMES[i] for i in sorted(only_class_ids)]
+        print(f"--only-classes restricts this run to unified classes: {only_names}")
+    if args.cross_class_iou is not None:
+        print(f"--cross-class-iou {args.cross_class_iou}: dedup checks ALL existing boxes, not just same-class")
 
     if args.dry_run:
         thresholds = sorted(set([args.conf] + list(args.report_thresholds)))
@@ -288,6 +372,7 @@ def main():
         for image_path, label_path in all_pairs:
             existing = read_existing_boxes(label_path)
             raw = detect_raw(model, image_path, lowest)
+            raw = filter_only_classes(raw, only_class_ids)
             per_image_raw.append((existing, raw))
 
         for t in thresholds:
@@ -295,7 +380,7 @@ def main():
             skipped_total = 0
             images_gained_person = 0
             for existing, raw in per_image_raw:
-                kept, n_skipped = filter_and_dedup(raw, existing, t, args.iou_dedup)
+                kept, n_skipped = filter_and_dedup(raw, existing, t, args.iou_dedup, args.cross_class_iou)
                 skipped_total += n_skipped
                 had_person_before = any(c == 5 for c, _ in existing)
                 gains_person = any(c == 5 for c, _ in kept)
@@ -321,7 +406,8 @@ def main():
     for image_path, label_path in all_pairs:
         existing = read_existing_boxes(label_path)
         raw = detect_raw(model, image_path, args.conf)
-        kept, n_skipped = filter_and_dedup(raw, existing, args.conf, args.iou_dedup)
+        raw = filter_only_classes(raw, only_class_ids)
+        kept, n_skipped = filter_and_dedup(raw, existing, args.conf, args.iou_dedup, args.cross_class_iou)
         skipped_total += n_skipped
 
         had_person_before = any(c == 5 for c, _ in existing)
