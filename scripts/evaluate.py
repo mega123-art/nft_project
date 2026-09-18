@@ -58,6 +58,11 @@ DEFAULT_MAP_SOURCES = [
     ("Phase 2 (public data only)", str(REPO_ROOT / "report" / "phase2_metrics.json")),
     ("Phase 3 sub (+signals, capped 1.5k)", str(REPO_ROOT / "report" / "phase3_sub_metrics.json")),
     ("Phase 3 full (+signals, all 8.1k)", str(REPO_ROOT / "report" / "phase3_full_metrics.json")),
+    # Trained AND inferred at 960. The earlier runs trained at 640, which is
+    # why crosswalk jumps here: a 640-trained model inferring at a larger size
+    # loses large objects entirely. See the commit for the measured table.
+    ("Phase 4 (imgsz 960)", str(REPO_ROOT / "report" / "phase4_imgsz960_metrics.json")),
+    ("Phase 5 (+pedestrian signals, 960)", str(REPO_ROOT / "report" / "phase5_ped960_metrics.json")),
 ]
 
 NOT_COMPUTED = "NOT_COMPUTED"  # sentinel; never a real metric value

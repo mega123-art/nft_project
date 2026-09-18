@@ -10,14 +10,14 @@ To unblock: annotate `data/ground_truth/frame_labels.csv` (schema in `data/groun
 
 ## End-to-end latency (frame capture -> audio start)
 
-n = 377 logged frames
+n = 567 logged frames
 
 | stat | ms |
 |---|---|
-| mean | 33.9 |
-| p50 | 32.3 |
-| p95 | 35.9 |
-| max | 550.2 |
+| mean | 63.0 |
+| p50 | 33.3 |
+| p95 | 153.4 |
+| max | 978.7 |
 
 Target: p95 < 300 ms -- **MEETS** target.
 
@@ -26,8 +26,9 @@ Target: p95 < 300 ms -- **MEETS** target.
 | video_source | frames | fps |
 |---|---|---|
 | data/raw_videos/car-detection.mp4 | 377 | 30.37 |
+| data/raw_videos/iEIk3RpV6RA.mp4 | 190 | 0.08 |
 
-Overall: 30.37 fps across all logged frames.
+Overall: 0.02 fps across all logged frames.
 
 ## TTC error vs. manually annotated ground truth
 
@@ -39,17 +40,17 @@ To unblock: annotate `data/ground_truth/ttc_observations.csv` (schema in `data/g
 
 This is PLAN.md's "strongest graph in the report" -- it is a table here; plot it directly from these numbers for the write-up.
 
-| class | Phase 2 (public data only) | Phase 3 sub (+signals, capped 1.5k) | Phase 3 full (+signals, all 8.1k) |
-|---|---|---|---|
-| car | 0.936 | 0.933 | 0.955 |
-| truck | 0.883 | 0.869 | 0.848 |
-| motorcycle | 0.882 | 0.870 | 0.851 |
-| autorickshaw | 0.896 | 0.913 | 0.888 |
-| person | 0.576 | 0.690 | 0.710 |
-| crosswalk | 0.825 | 0.874 | 0.872 |
-| bus | -- | 0.631 | 0.718 |
-| signal_red | -- | 0.648 | 0.594 |
-| signal_green | -- | 0.600 | 0.675 |
+| class | Phase 2 (public data only) | Phase 3 sub (+signals, capped 1.5k) | Phase 3 full (+signals, all 8.1k) | Phase 4 (imgsz 960) | Phase 5 (+pedestrian signals, 960) |
+|---|---|---|---|---|---|
+| car | 0.936 | 0.933 | 0.955 | 0.937 | 0.939 |
+| truck | 0.883 | 0.869 | 0.848 | 0.862 | 0.839 |
+| motorcycle | 0.882 | 0.870 | 0.851 | 0.869 | 0.877 |
+| autorickshaw | 0.896 | 0.913 | 0.888 | 0.923 | 0.921 |
+| person | 0.576 | 0.690 | 0.710 | 0.746 | 0.765 |
+| crosswalk | 0.825 | 0.874 | 0.872 | 0.919 | 0.932 |
+| bus | -- | 0.631 | 0.718 | 0.678 | 0.738 |
+| signal_red | -- | 0.648 | 0.594 | 0.691 | 0.731 |
+| signal_green | -- | 0.600 | 0.675 | 0.694 | 0.721 |
 
 ## Confusion matrix and PR curves
 
