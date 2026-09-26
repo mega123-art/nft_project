@@ -8,6 +8,16 @@ still exactly the Phase 0 plain capture loop. When --weights is given,
 each frame is run through src/detector.py, fed to a VehicleTracker
 (Phase 5) and a CrossingFSM (Phase 6), and boxes + TTC + the current
 verdict are drawn on it.
+
+--detect-every N (default 2) runs the detector on every Nth frame instead
+of every frame, to clear PLAN.md's 8-12fps ground rule: CPU inference at
+imgsz 960 (required -- see detector.py) measures at 6.7-7.9fps end to end,
+below that range, and imgsz cannot be lowered to fix it without losing
+crosswalk detection entirely. See run()'s docstring for exactly what
+happens on a skipped frame and why -- the short version is: the previous
+detection frame's boxes are reused unchanged for the overlay, but
+safety.py's tracker and fsm.py's state machine are only ever fed on a real
+detection frame, never on a skip.
 """
 
 import argparse
@@ -17,7 +27,7 @@ import time
 import cv2
 
 from detector import Detector
-from safety import VehicleTracker, APPROACHING, UNKNOWN
+from safety import VehicleTracker, APPROACHING, UNKNOWN, MAX_MISSED_FRAMES
 from fsm import CrossingFSM, SAFE_TO_CROSS, WAITING
 from audio import AudioAnnouncer
 from decision_log import DecisionLogger, DEFAULT_DB_PATH
@@ -127,7 +137,7 @@ def draw_verdict(frame, verdict):
 
 
 def run(cap, headless, max_frames, detector, save_frames_dir=None, save_frames_every=15,
-        announcer=None, decision_logger=None, video_source=None):
+        announcer=None, decision_logger=None, video_source=None, detect_every=1):
     """Read frames until the source ends, max_frames is hit, or 'q' is pressed.
 
     When detector is None this is the plain Phase 0 loop, unchanged. When a
@@ -150,20 +160,47 @@ def run(cap, headless, max_frames, detector, save_frames_dir=None, save_frames_e
     frame's verdict + detections handed to it for logs/decisions.db. Like
     announcer, it never blocks this loop beyond a queue put and never
     raises -- see decision_log.py.
+
+    detect_every runs the detector on every Nth frame instead of every
+    frame -- CPU inference at imgsz 960 (non-negotiable, see detector.py)
+    measures at 6.7-7.9 fps end to end, below PLAN.md's 8-12 fps ground
+    rule, and imgsz cannot be lowered to fix that: a 640-trained model
+    finds zero crosswalks at higher imgsz, and crosswalk is fsm.py's first
+    rule. detect_every=1 (the historical default) is unchanged behaviour.
+    See the block below for exactly what does and does not happen on a
+    skipped frame -- this is the one part of the whole change that is easy
+    to get subtly wrong, so it is spelled out in full rather than merely
+    summarised.
     """
     frame_count = 0
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     start_time = time.time()
-    inference_times = []  # seconds per frame, only filled in when detector is set
+    inference_times = []  # seconds per frame, only filled in on detection frames
     saved_frames = 0
 
     # Only needed when we actually have detections to track/decide on. Real
     # elapsed time (time.time()), not a frame counter, feeds safety.py's dt
     # -- the pipeline's fps varies (8-15 fps), so a fixed-dt assumption
     # would make the TTC estimate wrong.
-    tracker = VehicleTracker() if detector is not None else None
+    #
+    # max_missed_frames is scaled down by detect_every: safety.py counts a
+    # track's staleness in tracker.update() calls, and update() below is
+    # now only called on detection frames (see the loop). Left at the
+    # module default, a track would be kept alive detect_every times longer
+    # in wall-clock time than Phase 5 tuned MAX_MISSED_FRAMES for. This does
+    # not touch the TTC math itself, only how long a track survives with no
+    # fresh detections.
+    tracker = (
+        VehicleTracker(max_missed_frames=max(1, round(MAX_MISSED_FRAMES / detect_every)))
+        if detector is not None
+        else None
+    )
     fsm = CrossingFSM() if detector is not None else None
+
+    # Carried forward across skipped frames -- see the loop body below.
+    last_detections = []
+    last_verdict = None
 
     if save_frames_dir is not None:
         os.makedirs(save_frames_dir, exist_ok=True)
@@ -178,17 +215,106 @@ def run(cap, headless, max_frames, detector, save_frames_dir=None, save_frames_e
 
         if detector is not None:
             frame_start = time.time()
-            infer_start = frame_start
-            detections = detector.detect(frame)
-            inference_s = time.time() - infer_start
-            inference_times.append(inference_s)
-            tracker.update(detections, infer_start)
-            verdict = fsm.update(detections, tracker, width)
+            # frame_count is 1-based, so this is True on the very first
+            # frame regardless of detect_every -- the pipeline must not
+            # wait detect_every frames before it has ever seen anything.
+            is_detection_frame = (frame_count - 1) % detect_every == 0
+
+            if is_detection_frame:
+                infer_start = frame_start
+                detections = detector.detect(frame)
+                inference_s = time.time() - infer_start
+                inference_times.append(inference_s)
+                # CRITICAL (Phase 5): tracker.update() is only ever called
+                # here, on a frame the detector actually ran on, with the
+                # real box measured this instant and infer_start as its
+                # real timestamp. safety.py's TTC fit is a straight line
+                # through (timestamp, 1/width) pairs -- it does not care
+                # how many video frames separate two samples, only that
+                # each sample is a genuine (time, width) observation. If a
+                # skipped frame called update() again with the *same* box
+                # but a *later* timestamp, it would inject a fake
+                # zero-growth sample: du/dt for that pair is exactly 0,
+                # which drags the fitted approach_rate down and makes TTC
+                # look longer (or the track look NOT_APPROACHING) than it
+                # really is -- optimistic, in exactly the direction PLAN.md
+                # forbids. So skipped frames must not touch the tracker at
+                # all; the fit only ever sees real, distinct measurements,
+                # just spaced out over more wall-clock time when
+                # detect_every > 1. See tests/test_detect_every.py for a
+                # synthetic proof that TTC agrees closely between
+                # detect_every=1 and detect_every=3 for the same approach.
+                tracker.update(detections, infer_start)
+                # CRITICAL (Phase 6): fsm.update() runs once per detection
+                # cycle, not once per video frame, for the same reason.
+                # HYSTERESIS_FRAMES=8 in fsm.py is meant to require 8
+                # consecutive *real* verdicts before entering SAFE_TO_CROSS
+                # -- if this ran on every video frame while the detections
+                # feeding it only refresh every detect_every frames, the
+                # vote buffer would fill up with detect_every copies of the
+                # same stale evidence, and SAFE could be reached on far
+                # fewer genuinely independent observations than PLAN.md
+                # intended. Running it only on detection frames keeps "8
+                # consecutive votes" meaning "8 consecutive distinct looks
+                # at the road", at the cost of the 8-vote window now
+                # spanning detect_every times as much wall-clock time --
+                # slower to permit, which is the safe direction to be slow
+                # in. Leaving SAFE_TO_CROSS is still immediate on the next
+                # detection cycle (fsm.py's asymmetric hysteresis is
+                # untouched); the residual risk detect_every adds is that a
+                # newly-appearing hazard can go unseen for up to
+                # detect_every-1 frames because the detector simply did not
+                # run on them, not that the FSM is slow to react once it
+                # has evidence. See the state-sequence comparison in the
+                # report for how often this actually changes anything.
+                verdict = fsm.update(detections, tracker, width)
+                last_detections = detections
+                last_verdict = verdict
+            else:
+                # Reuse the previous detection frame's Detection list
+                # UNCHANGED, rather than extrapolating boxes forward with
+                # each track's recent velocity. Chosen over velocity
+                # propagation because: (a) it introduces no new code path
+                # that itself needs trusting -- a propagated box is a
+                # prediction, and a wrong prediction drawn as a solid green
+                # box looks exactly as confident as a real detection; (b)
+                # the staleness it introduces is small and bounded --
+                # boxes lag the true position by up to detect_every-1
+                # frames (at detect_every=2, less than one full video
+                # frame's worth of motion; at detect_every=3, up to two
+                # frames, well under 100ms of pipeline time even at the
+                # low end of PLAN.md's 8-12fps band) -- and it is confined
+                # to the overlay a human is glancing at, never to
+                # safety.py's TTC fit (which never sees these repeated
+                # boxes at all, see above); (c) it keeps this file's
+                # decision logic exactly as "plain readable Python" as
+                # PLAN.md demands -- no extra per-track kinematics to
+                # explain in the viva beyond what safety.py already has.
+                detections = last_detections
+                inference_s = None
+                verdict = last_verdict
+
             draw_detections(frame, detections, tracker)
             draw_min_ttc(frame, tracker.min_ttc())
             draw_verdict(frame, verdict)
 
             if announcer is not None:
+                # Safe to call every frame even when verdict is the exact
+                # same carried-forward object: announce() only acts when
+                # verdict.changed is True (see audio.py), and on a real
+                # transition that flag stays True on this same object for
+                # every skip frame until the next detection frame replaces
+                # it -- so this does NOT rely on a fresh state comparison
+                # here. What actually stops it re-announcing repeatedly is
+                # audio.py's own GLOBAL_COOLDOWN_S=2.0s rate limit: after
+                # the first of these repeated calls speaks, every following
+                # one lands within 2s (frames are 40-150ms apart at this
+                # pipeline's fps) and is suppressed as "just announced".
+                # This is a real, if currently harmless, coupling between
+                # --detect-every and audio.py's cooldown constant -- it
+                # would stop holding only if detect_every got large enough
+                # (or fps low enough) that consecutive frames were more
+                # than 2s apart, which is far outside any setting used here.
                 announcer.announce(verdict)
 
             if decision_logger is not None:
@@ -197,15 +323,29 @@ def run(cap, headless, max_frames, detector, save_frames_dir=None, save_frames_e
                 # above -- which is PLAN.md's "capture to audio start"
                 # latency. announce() itself only ever enqueues (see
                 # audio.py), so this is measured, not merely assumed, to be
-                # representative of that latency.
+                # representative of that latency. This is real, measured
+                # work even on a skipped frame (drawing + announce +
+                # logging still happen), so it is still logged as a
+                # meaningful total_ms rather than skipped.
+                #
+                # is_detection_frame=False rows carry the previous
+                # detection's verdict/detections forward -- logged (not
+                # dropped) so evaluate.py's wall-clock fps and a ground
+                # truth join by video frame index both still see one row
+                # per real video frame, but flagged so a consumer never
+                # mistakes "same evidence, logged twice" for "confirmed
+                # twice". inference_ms is None on these rows -- no
+                # inference ran -- which already excludes them from the
+                # inference-only fps average below without extra code.
                 total_ms = 1000.0 * (time.time() - frame_start)
                 decision_logger.log(
                     frame_count,
                     verdict,
                     tracker.unresolved_vehicles(),
                     detections,
-                    inference_ms=1000.0 * inference_s,
+                    inference_ms=1000.0 * inference_s if inference_s is not None else None,
                     total_ms=total_ms,
+                    is_detection_frame=is_detection_frame,
                 )
 
             if (
@@ -237,7 +377,7 @@ def run(cap, headless, max_frames, detector, save_frames_dir=None, save_frames_e
         if inference_times:
             mean_ms = 1000.0 * sum(inference_times) / len(inference_times)
             inference_fps = 1000.0 / mean_ms if mean_ms > 0 else 0.0
-            print(f"mean inference time: {mean_ms:.1f} ms/frame")
+            print(f"mean inference time: {mean_ms:.1f} ms/frame ({len(inference_times)} detection frames)")
             print(f"inference-only fps: {inference_fps:.2f}")
 
 
@@ -281,7 +421,22 @@ def main():
         action="store_true",
         help="disable Phase 8 decision logging even when --weights is given",
     )
+    parser.add_argument(
+        "--detect-every",
+        type=int,
+        default=2,
+        metavar="N",
+        help="run the detector on every Nth frame and carry the previous "
+        "detection forward on the rest (default 2); needed to clear "
+        "PLAN.md's 8-12fps ground rule at the required imgsz 960 -- see "
+        "run()'s docstring for exactly what is and isn't safe to skip. "
+        "1 disables skipping (the historical, pre-this-flag behaviour).",
+    )
     args = parser.parse_args()
+
+    if args.detect_every < 1:
+        print("error: --detect-every must be >= 1")
+        raise SystemExit(1)
 
     cap, is_camera = open_source(args.video)
 
@@ -321,6 +476,7 @@ def main():
             announcer=announcer,
             decision_logger=decision_logger,
             video_source=video_source_name,
+            detect_every=args.detect_every,
         )
     finally:
         cap.release()

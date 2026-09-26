@@ -36,6 +36,17 @@ integer column stamped onto every row (SCHEMA_VERSION below) does both. If
 Phase 8's follow-up ever needs to change the columns, evaluate.py can branch
 on this value instead of guessing from what columns happen to exist.
 
+IS_DETECTION_FRAME (added for main.py's --detect-every). When frame
+skipping is enabled, most video frames carry the previous detection frame's
+verdict and detections forward unchanged rather than re-running the
+detector (see main.py's run() docstring for why). Those rows are still
+logged -- dropping them would make compute_frame_rate()'s wall-clock fps in
+scripts/evaluate.py undercount the real video frame rate, and ground-truth
+frame_labels.csv is keyed by video frame index, not detection cycle -- but
+they are logged with is_detection_frame=0 so evaluate.py can tell "fresh
+evidence" from "carried forward" apart: the latter must not be double
+counted as new evidence when checking, say, how quickly the system reacts.
+
 GRACEFUL DEGRADATION, matching audio.py's shape exactly: any failure to
 open the database, create the writer thread, or write a batch is logged
 once as a warning and turns this logger into a no-op for the rest of its
@@ -57,7 +68,13 @@ logger = logging.getLogger(__name__)
 # Bump this and extend CREATE TABLE below if the columns ever change; keep
 # old rows readable by branching on the value evaluate.py sees, rather than
 # guessing from which columns happen to exist in an old logs/decisions.db.
-SCHEMA_VERSION = 1
+# Bumped to 2 for is_detection_frame (see main.py's --detect-every): a row
+# with is_detection_frame == 0 carries the *previous* detection frame's
+# verdict/detections forward unchanged (see main.py's run() docstring), not
+# a fresh evaluation of this video frame -- a consumer that averages
+# raw_state agreement or inference latency across rows needs to know that,
+# rather than silently double-counting stale evidence as new.
+SCHEMA_VERSION = 2
 
 DEFAULT_DB_PATH = "logs/decisions.db"
 
@@ -92,13 +109,14 @@ CREATE TABLE IF NOT EXISTS decisions (
     crosswalk_direction TEXT,
     detections_json TEXT NOT NULL,
     inference_ms REAL,
-    total_ms REAL
+    total_ms REAL,
+    is_detection_frame INTEGER NOT NULL DEFAULT 1
 )
 """
 
 
 def _row_from_verdict(frame_index, video_source, verdict, unresolved_vehicles,
-                       detections, inference_ms, total_ms):
+                       detections, inference_ms, total_ms, is_detection_frame):
     """Build the plain dict that gets queued. Kept as one small function so
     DecisionLogger.log() and the tests agree on exactly what a row contains."""
     detections_payload = [
@@ -119,6 +137,7 @@ def _row_from_verdict(frame_index, video_source, verdict, unresolved_vehicles,
         "detections_json": json.dumps(detections_payload),
         "inference_ms": inference_ms,
         "total_ms": total_ms,
+        "is_detection_frame": 1 if is_detection_frame else 0,
     }
 
 
@@ -180,14 +199,22 @@ class DecisionLogger:
         return self._enabled
 
     def log(self, frame_index, verdict, unresolved_vehicles, detections,
-            inference_ms, total_ms):
-        """Queue one frame's row. Never raises, never blocks meaningfully."""
+            inference_ms, total_ms, is_detection_frame=True):
+        """Queue one frame's row. Never raises, never blocks meaningfully.
+
+        is_detection_frame is True for a frame the detector actually ran
+        on, and False for a --detect-every skip frame where verdict and
+        detections are the previous detection frame's values carried
+        forward unchanged (see main.py's run() docstring). Defaulting to
+        True keeps every existing caller (detect-every disabled, and every
+        pre-existing test) logging exactly as before.
+        """
         if not self._enabled:
             return
         try:
             row = _row_from_verdict(
                 frame_index, self.video_source, verdict, unresolved_vehicles,
-                detections, inference_ms, total_ms,
+                detections, inference_ms, total_ms, is_detection_frame,
             )
             self._enqueue(row)
         except Exception:
@@ -247,12 +274,12 @@ class DecisionLogger:
                     schema_version, wall_time, frame_index, video_source,
                     state, raw_state, reason, min_ttc, unresolved_vehicles,
                     crosswalk_offset, crosswalk_direction, detections_json,
-                    inference_ms, total_ms
+                    inference_ms, total_ms, is_detection_frame
                 ) VALUES (
                     :schema_version, :wall_time, :frame_index, :video_source,
                     :state, :raw_state, :reason, :min_ttc, :unresolved_vehicles,
                     :crosswalk_offset, :crosswalk_direction, :detections_json,
-                    :inference_ms, :total_ms
+                    :inference_ms, :total_ms, :is_detection_frame
                 )
                 """,
                 batch,

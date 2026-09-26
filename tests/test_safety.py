@@ -255,6 +255,27 @@ def test_track_dropped_after_15_missed_frames():
     assert 7 not in tracker.tracks, "must drop once unseen for 15 frames"
 
 
+def test_max_missed_frames_is_overridable_for_detect_every():
+    """main.py's --detect-every scales this down (update() is only called
+    on detection frames there, so counting in update()-calls rather than
+    video frames would otherwise keep a track alive detect_every times
+    longer in wall-clock time than Phase 5 intended) -- see main.py's
+    run() docstring. Only the constructor default has to stay at the
+    module constant; this pins down that the override itself works."""
+    tracker = VehicleTracker(max_missed_frames=3)
+    tracker.update([make_detection(50.0, track_id=7)], 0.0)
+    assert 7 in tracker.tracks
+
+    t = 0.1
+    for i in range(2):
+        tracker.update([], t)
+        t += 0.1
+    assert 7 in tracker.tracks, "must not drop before the overridden threshold"
+
+    tracker.update([], t)  # 3rd consecutive miss
+    assert 7 not in tracker.tracks, "must drop at the overridden threshold, not the module default"
+
+
 def test_min_ttc_none_when_nothing_approaching():
     tracker = VehicleTracker()
     # one static, one receding -- neither is a threat

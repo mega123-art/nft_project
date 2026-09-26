@@ -549,8 +549,20 @@ class TrackState:
 class VehicleTracker:
     """Keeps per-track_id history and derives TTC / lateral drift from it."""
 
-    def __init__(self):
+    def __init__(self, max_missed_frames=MAX_MISSED_FRAMES):
         self.tracks = {}  # track_id -> TrackState
+        # Overridable so a caller that only feeds update() on a subset of
+        # video frames (main.py's --detect-every, see its module docstring)
+        # can shrink this to keep the real-world track-drop timeout roughly
+        # what Phase 5 tuned it for. update() is called once per detection
+        # cycle in that mode, so "frames_since_seen" here counts detection
+        # cycles, not video frames -- left at the module default,
+        # MAX_MISSED_FRAMES video frames of skipping become
+        # MAX_MISSED_FRAMES * detect_every video frames of real time before
+        # a track is dropped, which is not what PLAN.md's Phase 5 measured
+        # against. Nothing about the TTC math itself changes -- this only
+        # affects how long a track is kept alive with no fresh detections.
+        self._max_missed_frames = max_missed_frames
 
     def update(self, detections, timestamp):
         """Feed one frame's detections in. timestamp is a real elapsed-time
@@ -587,7 +599,7 @@ class VehicleTracker:
             if track_id in seen_ids:
                 continue
             track.frames_since_seen += 1
-            if track.frames_since_seen >= MAX_MISSED_FRAMES:
+            if track.frames_since_seen >= self._max_missed_frames:
                 dead_ids.append(track_id)
         for track_id in dead_ids:
             del self.tracks[track_id]

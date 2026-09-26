@@ -120,6 +120,36 @@ def test_rows_written_with_expected_values(tmp_path):
         logger.close()
 
 
+def test_is_detection_frame_defaults_true_and_can_be_set_false(tmp_path):
+    """Added for main.py's --detect-every: a skipped frame logs the
+    carried-forward verdict with is_detection_frame=0 so evaluate.py can
+    tell stale-but-logged evidence apart from a fresh detection. Every
+    pre-existing caller of log() (detect_every disabled, and every other
+    test in this file) doesn't pass this kwarg at all and must keep
+    getting is_detection_frame=1, unchanged."""
+    db_path = str(tmp_path / "decisions.db")
+    logger = DecisionLogger(db_path=db_path, video_source="clip.mp4", batch_size=1)
+    logger.log(1, make_verdict(), unresolved_vehicles=0, detections=[],
+               inference_ms=10.0, total_ms=12.0)
+    logger.log(2, make_verdict(), unresolved_vehicles=0, detections=[],
+               inference_ms=None, total_ms=3.0, is_detection_frame=False)
+    try:
+        assert wait_for_rows(db_path, 2) == 2
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        rows = {r["frame_index"]: r for r in conn.execute("SELECT * FROM decisions")}
+        conn.close()
+
+        assert rows[1]["is_detection_frame"] == 1
+        assert rows[1]["inference_ms"] == pytest.approx(10.0)
+
+        assert rows[2]["is_detection_frame"] == 0
+        assert rows[2]["inference_ms"] is None
+        assert rows[2]["total_ms"] == pytest.approx(3.0)
+    finally:
+        logger.close()
+
+
 def test_multiple_rows_batched_and_all_land(tmp_path):
     db_path = str(tmp_path / "decisions.db")
     # A small batch size forces at least one mid-run flush, not just the
