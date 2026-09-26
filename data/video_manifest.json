@@ -9,7 +9,8 @@
     "duration_seconds": 20,
     "resolution": "640x480",
     "filename": "data/raw_videos/11ARAj8vGh0.mp4",
-    "downloaded_at": "2026-09-18T10:43:56"
+    "downloaded_at": "2026-09-18T10:43:56",
+    "usable": true
   },
   {
     "url": "https://www.youtube.com/watch?v=PtbwIaCcNvY",
@@ -21,7 +22,8 @@
     "duration_seconds": 17,
     "resolution": "1920x1080",
     "filename": "data/raw_videos/PtbwIaCcNvY.mp4",
-    "downloaded_at": "2026-09-18T10:44:00"
+    "downloaded_at": "2026-09-18T10:44:00",
+    "usable": true
   },
   {
     "url": "https://www.youtube.com/watch?v=k2oy_wTM0yw",
@@ -33,7 +35,8 @@
     "duration_seconds": 13,
     "resolution": "1920x1080",
     "filename": "data/raw_videos/k2oy_wTM0yw.mp4",
-    "downloaded_at": "2026-09-18T10:44:04"
+    "downloaded_at": "2026-09-18T10:44:04",
+    "usable": true
   },
   {
     "url": "https://www.youtube.com/watch?v=iEIk3RpV6RA",
@@ -45,7 +48,8 @@
     "duration_seconds": 97,
     "resolution": "1920x1080",
     "filename": "data/raw_videos/iEIk3RpV6RA.mp4",
-    "downloaded_at": "2026-09-18T10:44:11"
+    "downloaded_at": "2026-09-18T10:44:11",
+    "usable": true
   },
   {
     "url": "https://www.youtube.com/watch?v=qDwcV8deQTI",
@@ -57,7 +61,8 @@
     "duration_seconds": 259,
     "resolution": "480x854",
     "filename": "data/raw_videos/qDwcV8deQTI.mp4",
-    "downloaded_at": "2026-09-18T10:44:25"
+    "downloaded_at": "2026-09-18T10:44:25",
+    "usable": true
   },
   {
     "url": "https://www.youtube.com/watch?v=nMlUr3H08jA",
@@ -69,7 +74,8 @@
     "duration_seconds": 1044,
     "resolution": "1920x1080",
     "filename": "data/raw_videos/nMlUr3H08jA.mp4",
-    "downloaded_at": "2026-09-18T17:18:43"
+    "downloaded_at": "2026-09-18T17:18:43",
+    "usable": true
   },
   {
     "url": "https://www.youtube.com/watch?v=SHB8fziSoqY",
@@ -81,7 +87,9 @@
     "duration_seconds": 68,
     "resolution": "1920x1080",
     "filename": "data/raw_videos/SHB8fziSoqY.mp4",
-    "downloaded_at": "2026-09-18T17:25:42"
+    "downloaded_at": "2026-09-18T17:25:42",
+    "usable": false,
+    "rejected_reason": "ANIMATED CARTOON, not real footage. Detections on it are meaningless: the orange-cartoon clip produced 223 signal_green detections at 0.80 conf, which is the model matching flat vector shapes, not traffic signals. File deleted; entry kept so it is never re-downloaded."
   },
   {
     "url": "https://www.youtube.com/watch?v=OpviXFoOkfs",
@@ -93,7 +101,9 @@
     "duration_seconds": 78,
     "resolution": "1920x1080",
     "filename": "data/raw_videos/OpviXFoOkfs.mp4",
-    "downloaded_at": "2026-09-18T17:26:08"
+    "downloaded_at": "2026-09-18T17:26:08",
+    "usable": false,
+    "rejected_reason": "ANIMATED CARTOON, not real footage. Detections on it are meaningless: the orange-cartoon clip produced 223 signal_green detections at 0.80 conf, which is the model matching flat vector shapes, not traffic signals. File deleted; entry kept so it is never re-downloaded."
   },
   {
     "url": "https://www.youtube.com/watch?v=wDwhncF6W6Y",
@@ -105,7 +115,8 @@
     "duration_seconds": 12,
     "resolution": "480x854",
     "filename": "data/raw_videos/wDwhncF6W6Y.mp4",
-    "downloaded_at": "2026-09-18T17:26:17"
+    "downloaded_at": "2026-09-18T17:26:17",
+    "usable": true
   },
   {
     "url": "https://www.youtube.com/watch?v=UKrCfg8pOxA",
@@ -117,7 +128,8 @@
     "duration_seconds": 68,
     "resolution": "1920x1012",
     "filename": "data/raw_videos/UKrCfg8pOxA.mp4",
-    "downloaded_at": "2026-09-18T17:26:42"
+    "downloaded_at": "2026-09-18T17:26:42",
+    "usable": true
   },
   {
     "url": "https://www.youtube.com/watch?v=bliKQZ0UOHM",
@@ -129,7 +141,8 @@
     "duration_seconds": 60,
     "resolution": "1920x1080",
     "filename": "data/raw_videos/bliKQZ0UOHM.mp4",
-    "downloaded_at": "2026-09-18T17:27:41"
+    "downloaded_at": "2026-09-18T17:27:41",
+    "usable": true
   },
   {
     "url": "https://www.youtube.com/watch?v=pctsiJdGgEI",
@@ -141,6 +154,8 @@
     "duration_seconds": 77,
     "resolution": "1920x1080",
     "filename": "data/raw_videos/pctsiJdGgEI.mp4",
-    "downloaded_at": "2026-09-18T17:28:01"
+    "downloaded_at": "2026-09-18T17:28:01",
+    "usable": false,
+    "rejected_reason": "ANIMATED CARTOON, not real footage. Detections on it are meaningless: the orange-cartoon clip produced 223 signal_green detections at 0.80 conf, which is the model matching flat vector shapes, not traffic signals. File deleted; entry kept so it is never re-downloaded."
   }
 ]
