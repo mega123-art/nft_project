@@ -58,5 +58,89 @@
     "resolution": "480x854",
     "filename": "data/raw_videos/qDwcV8deQTI.mp4",
     "downloaded_at": "2026-09-18T10:44:25"
+  },
+  {
+    "url": "https://www.youtube.com/watch?v=nMlUr3H08jA",
+    "video_id": "nMlUr3H08jA",
+    "title": "India: Every day life of People in Mumbai. Walking Tour. Hustle and Bustle of ordinary people.",
+    "uploader": "Streets & Ambience",
+    "upload_date": "20250314",
+    "licence": "Creative Commons Attribution license (reuse allowed)",
+    "duration_seconds": 1044,
+    "resolution": "1920x1080",
+    "filename": "data/raw_videos/nMlUr3H08jA.mp4",
+    "downloaded_at": "2026-09-18T17:18:43"
+  },
+  {
+    "url": "https://www.youtube.com/watch?v=SHB8fziSoqY",
+    "video_id": "SHB8fziSoqY",
+    "title": "Pedestrian Crossings with Traffic Lights",
+    "uploader": "Safe Roads Australia",
+    "upload_date": "20220617",
+    "licence": "Creative Commons Attribution license (reuse allowed)",
+    "duration_seconds": 68,
+    "resolution": "1920x1080",
+    "filename": "data/raw_videos/SHB8fziSoqY.mp4",
+    "downloaded_at": "2026-09-18T17:25:42"
+  },
+  {
+    "url": "https://www.youtube.com/watch?v=OpviXFoOkfs",
+    "video_id": "OpviXFoOkfs",
+    "title": "Using pedestrian crossings and children's crossings",
+    "uploader": "Safe Roads Australia",
+    "upload_date": "20220908",
+    "licence": "Creative Commons Attribution license (reuse allowed)",
+    "duration_seconds": 78,
+    "resolution": "1920x1080",
+    "filename": "data/raw_videos/OpviXFoOkfs.mp4",
+    "downloaded_at": "2026-09-18T17:26:08"
+  },
+  {
+    "url": "https://www.youtube.com/watch?v=wDwhncF6W6Y",
+    "video_id": "wDwhncF6W6Y",
+    "title": "Red Light, Green Walk: Legal Crossing Explained #nyc #cycling #shorts",
+    "uploader": "SoloRoadRyder",
+    "upload_date": "20240403",
+    "licence": "Creative Commons Attribution license (reuse allowed)",
+    "duration_seconds": 12,
+    "resolution": "480x854",
+    "filename": "data/raw_videos/wDwhncF6W6Y.mp4",
+    "downloaded_at": "2026-09-18T17:26:17"
+  },
+  {
+    "url": "https://www.youtube.com/watch?v=UKrCfg8pOxA",
+    "video_id": "UKrCfg8pOxA",
+    "title": "Crosswalk Safety",
+    "uploader": "Student Affairs | University of Arkansas ",
+    "upload_date": "20190930",
+    "licence": "Creative Commons Attribution license (reuse allowed)",
+    "duration_seconds": 68,
+    "resolution": "1920x1012",
+    "filename": "data/raw_videos/UKrCfg8pOxA.mp4",
+    "downloaded_at": "2026-09-18T17:26:42"
+  },
+  {
+    "url": "https://www.youtube.com/watch?v=bliKQZ0UOHM",
+    "video_id": "bliKQZ0UOHM",
+    "title": "HAWK Pedestrian System: Travel more safely",
+    "uploader": "Ramsey County",
+    "upload_date": "20170915",
+    "licence": "Creative Commons Attribution license (reuse allowed)",
+    "duration_seconds": 60,
+    "resolution": "1920x1080",
+    "filename": "data/raw_videos/bliKQZ0UOHM.mp4",
+    "downloaded_at": "2026-09-18T17:27:41"
+  },
+  {
+    "url": "https://www.youtube.com/watch?v=pctsiJdGgEI",
+    "video_id": "pctsiJdGgEI",
+    "title": "Midblock crossings - choosing a safe place to cross",
+    "uploader": "Safe Roads Australia",
+    "upload_date": "20220418",
+    "licence": "Creative Commons Attribution license (reuse allowed)",
+    "duration_seconds": 77,
+    "resolution": "1920x1080",
+    "filename": "data/raw_videos/pctsiJdGgEI.mp4",
+    "downloaded_at": "2026-09-18T17:28:01"
   }
 ]

@@ -48,3 +48,16 @@ https://www.youtube.com/watch?v=nMlUr3H08jA   # Mumbai daily life walking, 17m
 # licence of each.
 https://www.youtube.com/watch?v=K3TgjZ5KErg   # Walking New Delhi, traffic, 22m
 https://www.youtube.com/watch?v=9d8szg8LqV0   # Walking New Delhi 4K, 36m
+
+# ---------------------------------------------------------------------
+# Validation footage, added 2026-09-18. Project focus widened from Indian
+# roads to crossings generally, so the goal here is footage containing
+# GREEN pedestrian signals -- the one class never yet observed firing.
+# All Creative Commons (YouTube CC filter).
+https://www.youtube.com/watch?v=SHB8fziSoqY   # Pedestrian Crossings with Traffic Lights, 68s
+https://www.youtube.com/watch?v=OpviXFoOkfs   # Using pedestrian crossings, 78s
+https://www.youtube.com/watch?v=wDwhncF6W6Y   # Red Light Green Walk, NYC, 12s
+https://www.youtube.com/watch?v=qzPukrcmxIM   # Crosswalk Safety, 9m
+https://www.youtube.com/watch?v=UKrCfg8pOxA   # Crosswalk Safety, 68s
+https://www.youtube.com/watch?v=bliKQZ0UOHM   # HAWK pedestrian signal system, 61s
+https://www.youtube.com/watch?v=pctsiJdGgEI   # Midblock crossings, 77s
