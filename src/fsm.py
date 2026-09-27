@@ -150,7 +150,20 @@ POSITIVE_EVIDENCE_MIN_CONF = 0.6
 # ped_signal_red/veh_signal_red. See the module docstring's "LEGACY
 # WEIGHTS" section for the full reasoning.
 LEGACY_GREEN_WAIT_NAMES = ("veh_signal_green", "signal_green")
-LEGACY_RED_WAIT_NAMES = ("ped_signal_red", "veh_signal_red", "signal_red")
+# veh_signal_red is deliberately NOT here. A red light for cars is the
+# NORMAL companion of a green walk signal: at any working signalled
+# crossing, when the pedestrian signal goes green the vehicle signal is
+# red. Treating veh_signal_red as a WAIT trigger made ped_signal_green +
+# veh_signal_red resolve to WAITING, i.e. it made SAFE unreachable at a
+# real intersection even with a perfect detector. veh_signal_red is
+# therefore NEUTRAL: it never licenses SAFE on its own (rule 5 still
+# demands ped_signal_green), and it never blocks one either.
+#
+# A legacy bare "signal_red" from the old 10-class weights stays on the
+# WAIT side, because with those weights there is genuinely no way to tell
+# whether it was a pedestrian red (do not walk) or a vehicle red (cars
+# stopped). Unknown means conservative.
+LEGACY_RED_WAIT_NAMES = ("ped_signal_red", "signal_red")
 
 # A crosswalk detection within this fraction of frame-half-width either side
 # of centre reads as "centre" rather than left/right -- without a dead band
@@ -305,17 +318,19 @@ class CrossingFSM:
         if crosswalk_det is None:
             return SEARCHING, "looking for a crossing", None, offset, direction
 
-        # Rule 2: any red signal (pedestrian, vehicle, or legacy) present ->
-        # WAITING, unconditionally. No confidence gate here on purpose (see
-        # module docstring): a false-positive red only ever produces extra
-        # caution, so there is no safety reason to demand a higher bar for
-        # it, and demanding one would risk missing a real red. This check
-        # happens BEFORE min_ttc or any green signal is even looked at, so
-        # nothing below can override a red light -- this is what makes the
-        # red-light test unmissable. ped_signal_red and veh_signal_red are
-        # both WAIT-only signals; neither one, alone or together, is ever
-        # sufficient for SAFE (see rule 5) -- a stopped vehicle does not mean
-        # a pedestrian has permission.
+        # Rule 2: a PEDESTRIAN red (or an ambiguous legacy red) -> WAITING,
+        # unconditionally. No confidence gate here on purpose (see module
+        # docstring): a false-positive red only ever produces extra caution,
+        # so there is no safety reason to demand a higher bar for it, and
+        # demanding one would risk missing a real red. This check happens
+        # BEFORE min_ttc or any green signal is even looked at, so nothing
+        # below can override an explicit "do not walk".
+        #
+        # veh_signal_red is NOT checked here -- see LEGACY_RED_WAIT_NAMES.
+        # It is the normal companion of a green walk signal, so blocking on
+        # it would make SAFE unreachable at a real crossing. It still cannot
+        # license SAFE: rule 5 demands ped_signal_green, and stopped cars
+        # are not permission to walk.
         if any(d.cls_name in LEGACY_RED_WAIT_NAMES for d in detections):
             return WAITING, "wait, signal is red", tracker.min_ttc(), offset, direction
 

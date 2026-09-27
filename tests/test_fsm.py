@@ -468,19 +468,47 @@ def test_veh_signal_red_alone_does_not_produce_safe():
         assert verdict.raw_state != SAFE_TO_CROSS
         assert verdict.state != SAFE_TO_CROSS
     assert verdict.state == WAITING
-    # Rule 2 fires ("wait, signal is red") since veh_signal_red is in
-    # LEGACY_RED_WAIT_NAMES -- either way, the point being tested is that
-    # this never becomes SAFE.
-    assert verdict.reason == "wait, signal is red"
+    # veh_signal_red is NEUTRAL, not a WAIT trigger, so rule 2 does not fire
+    # here -- this falls through to rule 6's default. The safety property
+    # under test is unchanged and asserted above: stopped cars never become
+    # permission to walk.
+    assert verdict.reason == "unclear, please wait"
 
 
-def test_veh_signal_red_does_not_unlock_safe_even_with_ped_signal_green():
-    # Belt-and-braces: even if a ped_signal_green were also present in the
-    # same frame as veh_signal_red, rule 2 (red beats everything) still
-    # wins -- red is checked before any green, pedestrian or vehicle.
+def test_ped_green_with_veh_red_reaches_safe():
+    # THE realistic intersection state, and a regression test for a bug this
+    # test file previously enshrined. At any working signalled crossing, the
+    # moment the pedestrian signal turns green the vehicle signal is red --
+    # the two co-occur by design.
+    #
+    # An earlier version of this test asserted that this combination must
+    # produce WAITING, on the reasoning that "red beats everything". That
+    # made SAFE unreachable at a real crossing no matter how good the
+    # detector got, because ped_signal_green essentially never appears
+    # WITHOUT a veh_signal_red beside it. veh_signal_red is neutral: it
+    # cannot license SAFE (rule 5 still demands ped_signal_green) and it
+    # must not block one either.
     fsm = CrossingFSM()
     tracker = FakeTracker(min_ttc=None, unresolved=0)
     detections = [CROSSWALK_CENTRE, VEH_SIGNAL_RED, PED_SIGNAL_GREEN]
     verdict = fsm.update(detections, tracker, FRAME_WIDTH)
-    assert verdict.raw_state == WAITING
-    assert verdict.raw_reason == "wait, signal is red"
+    assert verdict.raw_state == SAFE_TO_CROSS
+    assert verdict.raw_reason == "safe to cross now"
+    # And it must survive the hysteresis window to become the committed
+    # state, not merely flicker as a raw verdict.
+    for _ in range(HYSTERESIS_FRAMES + 2):
+        verdict = fsm.update(detections, tracker, FRAME_WIDTH)
+    assert verdict.state == SAFE_TO_CROSS
+
+
+def test_ped_red_beats_veh_red_and_ped_green():
+    # A pedestrian red is an explicit "do not walk" and still overrides
+    # everything, including a coincidental ped_signal_green in frame (a
+    # scene that needs human judgement, so it resolves conservatively).
+    fsm = CrossingFSM()
+    tracker = FakeTracker(min_ttc=None, unresolved=0)
+    detections = [CROSSWALK_CENTRE, VEH_SIGNAL_RED, PED_SIGNAL_RED, PED_SIGNAL_GREEN]
+    for _ in range(HYSTERESIS_FRAMES + 5):
+        verdict = fsm.update(detections, tracker, FRAME_WIDTH)
+        assert verdict.raw_state != SAFE_TO_CROSS
+    assert verdict.state == WAITING
