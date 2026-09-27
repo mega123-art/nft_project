@@ -25,6 +25,7 @@ from fsm import (
     ROAD_WIDTH_M,
     WALK_SPEED_MPS,
     CROSSING_MARGIN_S,
+    UNSIGNALLED_CLEAR_FRAMES,
 )
 from safety import DECISION_TTC_THRESHOLD
 from detector import Detection
@@ -512,3 +513,89 @@ def test_ped_red_beats_veh_red_and_ped_green():
         verdict = fsm.update(detections, tracker, FRAME_WIDTH)
         assert verdict.raw_state != SAFE_TO_CROSS
     assert verdict.state == WAITING
+
+
+# --- Rule 5b: unsignalled crossings -------------------------------------
+# Most Indian crossings have no walking-man signal at all. Without rule 5b
+# the system hunts for a ped_signal_green that does not physically exist and
+# sits in WAITING forever -- safe, but useless on the roads it is built for.
+# Rule 5b licenses SAFE from DIRECT OBSERVATION instead: a sustained clear
+# road. These tests pin both halves: that it works, and that it is not a way
+# around any of the guards above it.
+
+def _clear_cycles():
+    return UNSIGNALLED_CLEAR_FRAMES + HYSTERESIS_FRAMES + 5
+
+
+def test_unsignalled_crossing_reaches_safe_on_sustained_clear_road():
+    fsm = CrossingFSM()
+    detections = [CROSSWALK_CENTRE]
+    for _ in range(_clear_cycles()):
+        verdict = fsm.update(detections, FakeTracker(min_ttc=None, unresolved=0), FRAME_WIDTH)
+    assert verdict.state == SAFE_TO_CROSS
+    assert verdict.reason == "safe to cross now, road is clear"
+
+
+def test_unsignalled_crossing_needs_the_full_sustained_window():
+    # Short of UNSIGNALLED_CLEAR_FRAMES the answer must still be WAIT. The
+    # long window is what compensates for the camera's finite field of view:
+    # "no vehicle visible" is not "no vehicle coming".
+    fsm = CrossingFSM()
+    for _ in range(UNSIGNALLED_CLEAR_FRAMES - 2):
+        verdict = fsm.update([CROSSWALK_CENTRE], FakeTracker(min_ttc=None, unresolved=0), FRAME_WIDTH)
+        assert verdict.raw_state != SAFE_TO_CROSS
+
+
+def test_unsignalled_streak_restarts_after_a_hazard():
+    # A hazard partway through must break the streak, not merely pause it.
+    fsm = CrossingFSM()
+    for i in range(UNSIGNALLED_CLEAR_FRAMES - 3):
+        fsm.update([CROSSWALK_CENTRE], FakeTracker(min_ttc=None, unresolved=0), FRAME_WIDTH)
+    # one hazardous cycle
+    fsm.update([CROSSWALK_CENTRE], FakeTracker(min_ttc=2.0, unresolved=0), FRAME_WIDTH)
+    # the next few clear cycles must NOT immediately tip into SAFE
+    for _ in range(4):
+        verdict = fsm.update([CROSSWALK_CENTRE], FakeTracker(min_ttc=None, unresolved=0), FRAME_WIDTH)
+        assert verdict.raw_state != SAFE_TO_CROSS
+
+
+def test_unsignalled_rule_does_not_bypass_the_ped_green_confidence_gate():
+    # THE important one. A ped_signal_green at 0.45 fails rule 5's 0.6 gate.
+    # If rule 5b then fired, a low-confidence green would be laundered into a
+    # SAFE verdict -- the exact false-safe shape this file exists to prevent.
+    # Any ped_signal_* box at ANY confidence stands rule 5b down.
+    fsm = CrossingFSM()
+    weak_green = make_detection("ped_signal_green", conf=0.45, x1=0.0, x2=10.0)
+    for _ in range(_clear_cycles()):
+        verdict = fsm.update([CROSSWALK_CENTRE, weak_green],
+                             FakeTracker(min_ttc=None, unresolved=0), FRAME_WIDTH)
+        assert verdict.raw_state != SAFE_TO_CROSS
+        assert verdict.state != SAFE_TO_CROSS
+
+
+def test_unsignalled_rule_never_overrides_a_hazard():
+    # Each guard above rule 5b must still hold across the whole window.
+    cases = [
+        ("vehicle green", [CROSSWALK_CENTRE, VEH_SIGNAL_GREEN], dict(min_ttc=None, unresolved=0)),
+        ("pedestrian red", [CROSSWALK_CENTRE, PED_SIGNAL_RED], dict(min_ttc=None, unresolved=0)),
+        ("approaching", [CROSSWALK_CENTRE], dict(min_ttc=3.0, unresolved=0)),
+        ("unassessable vehicle", [CROSSWALK_CENTRE], dict(min_ttc=None, unresolved=1)),
+        ("no crosswalk", [], dict(min_ttc=None, unresolved=0)),
+    ]
+    for label, detections, tracker_kwargs in cases:
+        fsm = CrossingFSM()
+        for _ in range(_clear_cycles()):
+            verdict = fsm.update(detections, FakeTracker(**tracker_kwargs), FRAME_WIDTH)
+            assert verdict.raw_state != SAFE_TO_CROSS, label
+            assert verdict.state != SAFE_TO_CROSS, label
+
+
+def test_unsignalled_rule_ignores_vehicle_red_as_evidence():
+    # A veh_signal_red may be present and the verdict may reach SAFE -- but
+    # the permission comes from the sustained clear road, NOT from the red.
+    # Proof: identical detections with a NON-clear road stay WAITING.
+    fsm = CrossingFSM()
+    for _ in range(_clear_cycles()):
+        verdict = fsm.update([CROSSWALK_CENTRE, VEH_SIGNAL_RED],
+                             FakeTracker(min_ttc=2.0, unresolved=0), FRAME_WIDTH)
+        assert verdict.raw_state != SAFE_TO_CROSS

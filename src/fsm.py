@@ -111,6 +111,23 @@ DONE = "DONE"
 # to ignore a single flickered detection, short enough not to feel laggy.
 HYSTERESIS_FRAMES = 8
 
+# --- unsignalled crossings (rule 5b) ---
+# How many CONSECUTIVE decision cycles the road must read as clear before an
+# unsignalled crossing may be declared safe. Deliberately 3x HYSTERESIS_FRAMES.
+#
+# Rule 5 (a green walking-man) has an external authority saying "pedestrians
+# may cross now". An unsignalled crossing has no such authority, so the only
+# evidence is what this camera can see -- and the camera sees a finite field
+# of view. "No vehicle visible" is not the same claim as "no vehicle coming":
+# a car can be just outside frame, or hidden behind a bus, and arrive a second
+# later. A longer sustained-clear window is the only honest compensation for
+# that, since it means a vehicle entering from outside the frame has had time
+# to appear and be tracked before the verdict is given.
+#
+# At the ~8 decisions/sec this pipeline runs at (15fps with --detect-every 2)
+# 24 cycles is roughly 3 seconds of continuously clear road.
+UNSIGNALLED_CLEAR_FRAMES = 24
+
 # --- Crossing-time check --------------------------------------------------
 # Placeholder config constant -- PLAN.md explicitly allows this for now.
 # 10.0m is a rough two-lane-plus-shoulder Indian road width. This MUST be
@@ -269,6 +286,11 @@ class CrossingFSM:
         self._vote_state = None
         self._vote_count = 0
 
+        # Rule 5b: consecutive cycles an UNSIGNALLED crossing has read as
+        # clear. Starts at 0 for the same reason _state starts at
+        # SEARCHING -- nothing has been observed yet, so no credit is owed.
+        self._unsignalled_clear_count = 0
+
     def update(self, detections, tracker, frame_width):
         """Return this frame's Verdict. Never raises."""
         try:
@@ -310,6 +332,17 @@ class CrossingFSM:
         for THIS frame only -- no hysteresis applied here."""
         crosswalk_det = _best_detection(detections, "crosswalk", POSITIVE_EVIDENCE_MIN_CONF)
         offset, direction = _crosswalk_offset(crosswalk_det, frame_width)
+
+        # Rule 5b's consecutive-clear streak. Zeroing it here and restoring
+        # it only on rule 5b's fully-clear path means EVERY early return
+        # above -- red signal, green vehicle signal, turning vehicle,
+        # approaching vehicle, no crosswalk -- breaks the streak without
+        # each of those branches having to remember to reset it. A rule
+        # added later gets that behaviour for free, which is the safe
+        # default: forgetting to reset would silently let a streak survive
+        # a hazard.
+        prev_unsignalled_clear = self._unsignalled_clear_count
+        self._unsignalled_clear_count = 0
 
         # Rule 1: no crosswalk detected -> SEARCHING. Checked first and
         # returns immediately -- with no crossing in view there is nothing
@@ -389,6 +422,50 @@ class CrossingFSM:
         ped_signal_green = _best_detection(detections, "ped_signal_green", POSITIVE_EVIDENCE_MIN_CONF)
         if ped_signal_green is not None and self._road_is_clear(min_ttc, tracker.unresolved_vehicles()):
             return SAFE_TO_CROSS, "safe to cross now", min_ttc, offset, direction
+
+        # Rule 5b: UNSIGNALLED crossing. Most Indian crossings have no
+        # walking-man signal at all -- just painted stripes and vehicle
+        # lights. Without this rule the system would hunt for a
+        # ped_signal_green that physically does not exist and sit in
+        # WAITING forever, which is safe but useless.
+        #
+        # The evidence here is direct observation of the road rather than
+        # an external authority: no vehicle approaching, nothing the
+        # tracker cannot assess, and enough time to walk the crossing --
+        # sustained over UNSIGNALLED_CLEAR_FRAMES consecutive cycles.
+        #
+        # This only applies where there is genuinely NO pedestrian signal.
+        # If ANY ped_signal_* box is present at ANY confidence, this rule
+        # stands down: a crossing that has a pedestrian signal must be
+        # decided by that signal, via rule 5 and its 0.6 gate. Without this
+        # guard the rule would be a way around that gate -- a
+        # ped_signal_green seen at 0.45 would fail rule 5 and then quietly
+        # succeed here, which is exactly the false-safe shape this file
+        # exists to prevent. A ped_signal_red never reaches this point at
+        # all (rule 2 already returned), and a veh_signal_green never does
+        # either (rule 2b).
+        #
+        # Vehicle signals are deliberately NOT consulted. A veh_signal_red
+        # would be tempting supporting evidence, but this system cannot
+        # tell WHICH approach a signal head governs -- a red facing the
+        # cross-direction means the traffic that would hit you has green.
+        # Observed vehicle behaviour is the more trustworthy signal, and it
+        # is already required above.
+        if not any(d.cls_name.startswith("ped_signal_") for d in detections):
+            if self._road_is_clear(min_ttc, tracker.unresolved_vehicles()):
+                # _unsignalled_clear_count was zeroed at the top of this
+                # method, so any blocking rule above leaves the streak
+                # broken. Restoring the previous value here is what makes
+                # it count CONSECUTIVE clear cycles.
+                self._unsignalled_clear_count = prev_unsignalled_clear + 1
+                if self._unsignalled_clear_count >= UNSIGNALLED_CLEAR_FRAMES:
+                    return (
+                        SAFE_TO_CROSS,
+                        "safe to cross now, road is clear",
+                        min_ttc,
+                        offset,
+                        direction,
+                    )
 
         # Rule 6: otherwise -- e.g. no pedestrian signal detected at all,
         # ped_signal_green too low-confidence to trust, or the road fails
