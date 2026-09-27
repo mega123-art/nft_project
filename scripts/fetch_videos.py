@@ -1,8 +1,10 @@
 """
 Phase 4 step 0 (not in the numbered PLAN.md list, but needed before step 1):
 download supplementary clips with yt-dlp to fill the classes our own phone
-footage may not cover well -- mainly signal_red/signal_green (zero training
-data as of Phase 2/3) and hard conditions like night and rain.
+footage may not cover well -- mainly the signal classes (ped_signal_red/
+ped_signal_green/veh_signal_red/veh_signal_green, split from the old
+signal_red/signal_green pair after a false-safe review -- see src/fsm.py;
+zero training data as of Phase 2/3) and hard conditions like night and rain.
 
 Licence audit trail: every download, successful or not, is not what gets
 recorded -- only successful downloads are -- but every successful one is

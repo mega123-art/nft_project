@@ -61,8 +61,24 @@ class FakeTracker:
 
 
 CROSSWALK_CENTRE = make_detection("crosswalk", conf=0.9, x1=90.0, x2=110.0)  # centred in a 200px frame
-SIGNAL_RED = make_detection("signal_red", conf=0.9, x1=0.0, x2=10.0)
-SIGNAL_GREEN = make_detection("signal_green", conf=0.9, x1=0.0, x2=10.0)
+
+# Post-review-fix taxonomy: ped_signal_* is what actually licenses SAFE;
+# veh_signal_* and legacy signal_* (old models/best.pt weights, trained
+# before the ped/veh split) are all WAIT-only evidence. SIGNAL_RED/
+# SIGNAL_GREEN keep their old names as aliases to ped_signal_red/
+# ped_signal_green so every pre-existing test below (which was written
+# against the shared-class taxonomy and is still testing a real, unchanged
+# rule -- e.g. "a red signal always wins") keeps meaning the same thing:
+# "the pedestrian signal is red/green". Tests specifically about the new
+# veh_signal_*/legacy split use the *_SIGNAL_GREEN/RED names below instead.
+PED_SIGNAL_RED = make_detection("ped_signal_red", conf=0.9, x1=0.0, x2=10.0)
+PED_SIGNAL_GREEN = make_detection("ped_signal_green", conf=0.9, x1=0.0, x2=10.0)
+SIGNAL_RED = PED_SIGNAL_RED
+SIGNAL_GREEN = PED_SIGNAL_GREEN
+VEH_SIGNAL_RED = make_detection("veh_signal_red", conf=0.9, x1=0.0, x2=10.0)
+VEH_SIGNAL_GREEN = make_detection("veh_signal_green", conf=0.9, x1=0.0, x2=10.0)
+LEGACY_SIGNAL_GREEN = make_detection("signal_green", conf=0.9, x1=0.0, x2=10.0)  # old models/best.pt name
+LEGACY_SIGNAL_RED = make_detection("signal_red", conf=0.9, x1=0.0, x2=10.0)  # old models/best.pt name
 FRAME_WIDTH = 200
 
 
@@ -345,5 +361,126 @@ def test_red_light_reason_still_wins_over_crossing_reason():
     fsm = CrossingFSM()
     tracker = FakeTracker(min_ttc=None, unresolved=0, crossing=["some_track"])
     verdict = fsm.update([CROSSWALK_CENTRE, SIGNAL_RED], tracker, FRAME_WIDTH)
+    assert verdict.raw_state == WAITING
+    assert verdict.raw_reason == "wait, signal is red"
+
+
+# ---------------------------------------------------------------------------
+# Post-review-fix taxonomy split: ped_signal_* vs veh_signal_* vs legacy
+# signal_* (old models/best.pt). This is the safety-critical part of the
+# fix -- a green VEHICLE light must never be read as pedestrian permission
+# to cross. See src/fsm.py's module docstring "POST-REVIEW FIX" section.
+# ---------------------------------------------------------------------------
+
+def test_veh_signal_green_forces_waiting_even_with_clear_road():
+    # A textbook-otherwise-safe road (no TTC, nothing unresolved) but the
+    # signal facing the CARS is green -- that is danger evidence for a
+    # pedestrian (traffic has right of way), not permission, and must never
+    # reach SAFE.
+    fsm = CrossingFSM()
+    tracker = FakeTracker(min_ttc=None, unresolved=0)
+    verdict = fsm.update([CROSSWALK_CENTRE, VEH_SIGNAL_GREEN], tracker, FRAME_WIDTH)
+    assert verdict.raw_state == WAITING
+    assert verdict.raw_reason == "wait, vehicle signal is green"
+    assert verdict.raw_state != SAFE_TO_CROSS
+
+
+def test_veh_signal_green_beats_safe_even_with_ped_signal_green_also_present():
+    # If both a pedestrian green and a vehicle green show up in the same
+    # frame (e.g. two signal heads in view), the conservative rule wins --
+    # rule 2b is checked before rule 5 can ever look at ped_signal_green.
+    fsm = CrossingFSM()
+    tracker = FakeTracker(min_ttc=None, unresolved=0)
+    verdict = fsm.update([CROSSWALK_CENTRE, PED_SIGNAL_GREEN, VEH_SIGNAL_GREEN], tracker, FRAME_WIDTH)
+    assert verdict.raw_state == WAITING
+    assert verdict.raw_reason == "wait, vehicle signal is green"
+
+
+def test_kill_scenario_receding_vehicles_and_green_vehicle_light_is_waiting():
+    # The exact kill scenario from the review: a vehicle light turns green,
+    # cars ahead are driving AWAY from the camera so they track as
+    # NOT_APPROACHING (min_ttc is None, receding vehicles don't produce a
+    # TTC per safety.py), and there are no unresolved vehicles either. Under
+    # the OLD shared-class rule this reached SAFE_TO_CROSS right as traffic
+    # accelerated through the junction. It must now be WAITING.
+    fsm = CrossingFSM()
+    tracker = FakeTracker(min_ttc=None, unresolved=0)  # receding traffic: no TTC, nothing unresolved
+    detections = [CROSSWALK_CENTRE, VEH_SIGNAL_GREEN]
+    for _ in range(HYSTERESIS_FRAMES + 10):
+        verdict = fsm.update(detections, tracker, FRAME_WIDTH)
+        assert verdict.raw_state != SAFE_TO_CROSS
+        assert verdict.state != SAFE_TO_CROSS
+    assert verdict.state == WAITING
+    assert verdict.reason == "wait, vehicle signal is green"
+
+
+def test_ped_signal_green_and_clear_road_still_reaches_safe():
+    # The system must not become incapable of ever saying SAFE: a genuine
+    # pedestrian green, on a clear road, still reaches SAFE_TO_CROSS after
+    # the hysteresis window, same as the old shared-class behaviour did for
+    # a "real" (pedestrian) green.
+    fsm = CrossingFSM()
+    tracker = FakeTracker(min_ttc=None, unresolved=0)
+    detections = [CROSSWALK_CENTRE, PED_SIGNAL_GREEN]
+    verdict = None
+    for _ in range(HYSTERESIS_FRAMES):
+        verdict = fsm.update(detections, tracker, FRAME_WIDTH)
+    assert verdict.raw_state == SAFE_TO_CROSS
+    assert verdict.state == SAFE_TO_CROSS
+    assert verdict.reason == "safe to cross now"
+
+
+def test_legacy_signal_green_from_old_weights_never_produces_safe():
+    # models/best.pt predates the ped/veh split and still emits the bare old
+    # name "signal_green". It must be treated conservatively as vehicle-
+    # signal (WAIT) evidence, never as pedestrian permission -- this is the
+    # single most important regression test in this file for a real,
+    # currently-deployed model.
+    fsm = CrossingFSM()
+    tracker = FakeTracker(min_ttc=None, unresolved=0)  # otherwise-clear road
+    detections = [CROSSWALK_CENTRE, LEGACY_SIGNAL_GREEN]
+    for _ in range(HYSTERESIS_FRAMES + 10):
+        verdict = fsm.update(detections, tracker, FRAME_WIDTH)
+        assert verdict.raw_state != SAFE_TO_CROSS
+        assert verdict.state != SAFE_TO_CROSS
+    assert verdict.state == WAITING
+    assert verdict.raw_reason == "wait, vehicle signal is green"
+
+
+def test_legacy_signal_red_is_wait_evidence():
+    fsm = CrossingFSM()
+    tracker = FakeTracker(min_ttc=None, unresolved=0)
+    verdict = fsm.update([CROSSWALK_CENTRE, LEGACY_SIGNAL_RED], tracker, FRAME_WIDTH)
+    assert verdict.raw_state == WAITING
+    assert verdict.raw_reason == "wait, signal is red"
+
+
+def test_veh_signal_red_alone_does_not_produce_safe():
+    # A stopped vehicle facing a red light says nothing about whether a
+    # pedestrian has permission to cross -- no crosswalk-facing pedestrian
+    # signal was ever seen green, so this must stay WAITING (via the
+    # rule-6 default), never SAFE, however long it persists.
+    fsm = CrossingFSM()
+    tracker = FakeTracker(min_ttc=None, unresolved=0)
+    detections = [CROSSWALK_CENTRE, VEH_SIGNAL_RED]
+    for _ in range(HYSTERESIS_FRAMES + 10):
+        verdict = fsm.update(detections, tracker, FRAME_WIDTH)
+        assert verdict.raw_state != SAFE_TO_CROSS
+        assert verdict.state != SAFE_TO_CROSS
+    assert verdict.state == WAITING
+    # Rule 2 fires ("wait, signal is red") since veh_signal_red is in
+    # LEGACY_RED_WAIT_NAMES -- either way, the point being tested is that
+    # this never becomes SAFE.
+    assert verdict.reason == "wait, signal is red"
+
+
+def test_veh_signal_red_does_not_unlock_safe_even_with_ped_signal_green():
+    # Belt-and-braces: even if a ped_signal_green were also present in the
+    # same frame as veh_signal_red, rule 2 (red beats everything) still
+    # wins -- red is checked before any green, pedestrian or vehicle.
+    fsm = CrossingFSM()
+    tracker = FakeTracker(min_ttc=None, unresolved=0)
+    detections = [CROSSWALK_CENTRE, VEH_SIGNAL_RED, PED_SIGNAL_GREEN]
+    verdict = fsm.update(detections, tracker, FRAME_WIDTH)
     assert verdict.raw_state == WAITING
     assert verdict.raw_reason == "wait, signal is red"

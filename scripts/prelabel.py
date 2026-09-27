@@ -10,10 +10,13 @@ not error out -- it silently shuffles every class, so the mapping is written
 to disk AND printed every run.
 
 IMPORTANT caveat, printed at the end of every run: models/best.pt (as of
-Phase 2/3) has zero training examples of signal_red, signal_green, and
-signal_countdown. A model cannot predict a class it has never seen a
-positive example of. It will not draw a single signal box, ever, no matter
-how --conf is tuned. Every signal_red/signal_green/signal_countdown box in
+Phase 2/3, and still the deployed model as of the ped/veh signal-class
+split -- see src/fsm.py's "LEGACY WEIGHTS" note) has zero training examples
+of ped_signal_red, ped_signal_green, veh_signal_red, veh_signal_green, and
+signal_countdown, and in fact still emits the OLD pre-split class names
+(signal_red/signal_green) rather than any of these five. A model cannot
+predict a class it has never seen a positive example of. It will not draw a
+single signal box, ever, no matter how --conf is tuned. Every signal box in
 this dataset has to be drawn by hand.
 """
 
@@ -26,11 +29,13 @@ from ultralytics import YOLO
 
 IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png")
 
-# The unified 10-class list from PLAN.md / data/data.yaml, in ID order. This
+# The unified 12-class list from PLAN.md / data/data.yaml, in ID order. This
 # is what gets written into the output data.yaml/classes.txt. It is only
 # correct as long as --weights was trained on exactly this class list --
 # print it loudly so a mismatch is obvious rather than silently corrupting
-# every label on upload.
+# every label on upload. models/best.pt still predates this list (see the
+# module docstring), so running prelabel.py against it WILL print the
+# mismatch warning below -- that is expected and correct, not a bug.
 UNIFIED_NAMES = [
     "car",
     "bus",
@@ -39,16 +44,18 @@ UNIFIED_NAMES = [
     "autorickshaw",
     "person",
     "crosswalk",
-    "signal_red",
-    "signal_green",
+    "ped_signal_red",
+    "ped_signal_green",
+    "veh_signal_red",
+    "veh_signal_green",
     "signal_countdown",
 ]
 
-# signal_countdown joins signal_red/signal_green here: no public dataset we
+# signal_countdown joins the four signal classes here: no public dataset we
 # use has boxed countdown-timer annotations either, so a model prelabelling
 # with --weights will never propose a signal_countdown box -- every one of
-# those has to be drawn by hand too, same caveat as the other two.
-NO_SIGNAL_DATA_CLASSES = {"signal_red", "signal_green", "signal_countdown"}
+# those has to be drawn by hand too, same caveat as the other four.
+NO_SIGNAL_DATA_CLASSES = {"ped_signal_red", "ped_signal_green", "veh_signal_red", "veh_signal_green", "signal_countdown"}
 
 
 def find_images(frames_dir):
@@ -169,7 +176,7 @@ def main():
     class_names = [class_names[i] for i in sorted(class_names)]
 
     if class_names != UNIFIED_NAMES:
-        print("warning: model's class list does not match the expected unified 10-class list.")
+        print("warning: model's class list does not match the expected unified 12-class list.")
         print(f"  model:    {class_names}")
         print(f"  expected: {UNIFIED_NAMES}")
         print("  writing labels using the MODEL's own order -- double check before uploading.")
@@ -197,11 +204,12 @@ def main():
         print(f"  {name:<14} {per_class_totals[name]}{flag}")
 
     print(
-        "\nCAVEAT: models/best.pt has no signal_red / signal_green / signal_countdown "
-        "training examples as of Phase 2/3. It cannot and will not pre-label any traffic "
-        "signal, at any --conf. Every signal_red, signal_green and signal_countdown box "
-        "in this dataset must be drawn by hand in Roboflow -- pre-labelling only saves "
-        "time on vehicles, person and crosswalk."
+        "\nCAVEAT: models/best.pt has no ped_signal_red / ped_signal_green / veh_signal_red / "
+        "veh_signal_green / signal_countdown training examples, and still predates the ped/veh "
+        "signal-class split entirely (it emits the old signal_red/signal_green names -- see "
+        "src/fsm.py's LEGACY WEIGHTS note). It cannot and will not pre-label any traffic "
+        "signal, at any --conf. Every signal box in this dataset must be drawn by hand in "
+        "Roboflow -- pre-labelling only saves time on vehicles, person and crosswalk."
     )
 
 

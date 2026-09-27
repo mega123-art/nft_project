@@ -3,7 +3,7 @@ Phase 1 step 4: merge the remapped datasets into one YOLO dataset with an
 85/15 train/val split, and write data/data.yaml describing it.
 
 Input: one or more dataset directories that have already been through
-remap_classes.py (so their label files already use our unified 0-8 class
+remap_classes.py (so their label files already use our unified 0-11 class
 ids, mixed across whatever splits the original download had — train/valid/
 test all get pooled and re-split here).
 
@@ -44,11 +44,15 @@ import random
 import shutil
 from collections import defaultdict
 
-# signal_countdown (9) has zero boxed training data in any source this
+# signal_countdown (11) has zero boxed training data in any source this
 # script merges -- see PLAN.md's class table and data/LABELLING.md. It is
 # listed here anyway so nc/names in the written data.yaml always match the
 # other UNIFIED_NAMES copies exactly; a mismatched class list between files
 # silently shuffles every class.
+#
+# signal_red/signal_green were split into ped_signal_*/veh_signal_* after a
+# reviewer found a false-safe path -- see scripts/generate_mapping.py and
+# src/fsm.py for the full story.
 UNIFIED_NAMES = [
     "car",
     "bus",
@@ -57,10 +61,18 @@ UNIFIED_NAMES = [
     "autorickshaw",
     "person",
     "crosswalk",
-    "signal_red",
-    "signal_green",
+    "ped_signal_red",
+    "ped_signal_green",
+    "veh_signal_red",
+    "veh_signal_green",
     "signal_countdown",
 ]
+
+# IDs of the four signal classes, used by bucket_by_signal/stratified_sample
+# below to keep red/green representation balanced across BOTH the
+# pedestrian and vehicle signal classes when subsampling.
+_RED_SIGNAL_IDS = {UNIFIED_NAMES.index("ped_signal_red"), UNIFIED_NAMES.index("veh_signal_red")}
+_GREEN_SIGNAL_IDS = {UNIFIED_NAMES.index("ped_signal_green"), UNIFIED_NAMES.index("veh_signal_green")}
 
 DEFAULT_SOURCES = [
     "data/datasets/indian_roads",
@@ -111,7 +123,12 @@ def print_histogram(title, counts):
 
 def bucket_by_signal(label_path):
     """Classify one label file as 'red', 'green', 'both' or 'neither' based
-    on whether it carries a signal_red (7) and/or signal_green (8) box."""
+    on whether it carries a red (ped_signal_red or veh_signal_red) and/or
+    green (ped_signal_green or veh_signal_green) signal box. Pedestrian and
+    vehicle signal ids are pooled here on purpose -- this bucketing is only
+    about keeping red/green representation balanced during subsampling, not
+    about the ped/veh distinction that src/fsm.py's decision rules care
+    about."""
     has_red = has_green = False
     with open(label_path) as f:
         for line in f:
@@ -119,9 +136,9 @@ def bucket_by_signal(label_path):
             if not line:
                 continue
             cls_id = int(line.split()[0])
-            if cls_id == 7:
+            if cls_id in _RED_SIGNAL_IDS:
                 has_red = True
-            elif cls_id == 8:
+            elif cls_id in _GREEN_SIGNAL_IDS:
                 has_green = True
     if has_red and has_green:
         return "both"
@@ -214,9 +231,11 @@ def subsample_by_source(all_items, subsample_prefixes, target_total):
     print(f"\nsubsampling {present} down to ~{target_total} images total:")
     for p in present:
         counts = count_classes([label_path for _, label_path, _ in selected[p]])
+        red_count = sum(counts.get(i, 0) for i in _RED_SIGNAL_IDS)
+        green_count = sum(counts.get(i, 0) for i in _GREEN_SIGNAL_IDS)
         print(
             f"  {p}: {len(by_prefix[p])} available -> {len(selected[p])} selected "
-            f"(signal_red {counts.get(7, 0)}, signal_green {counts.get(8, 0)})"
+            f"(red signals {red_count}, green signals {green_count})"
         )
     if shortfall > 0:
         print(f"  warning: could not reach {target_total} images, {shortfall} short (sources ran out)")
@@ -245,7 +264,7 @@ def main():
         default=None,
         metavar="SOURCE_DIR_NAME",
         help="source directory basenames (as they appear in --sources) to cap at --subsample-total combined "
-        "images, stratified by signal_red/signal_green. Default: no subsampling.",
+        "images, stratified by ped/veh signal red vs green. Default: no subsampling.",
     )
     parser.add_argument(
         "--subsample-total",

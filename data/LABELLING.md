@@ -39,36 +39,73 @@ Reasoning:
   know *which* lamp is lit, and one box covering all three lamps cannot
   encode that.
 
-## 2. signal_red vs signal_green — colour and edge cases
+## 2. Signal classes — colour, ped/veh split, and edge cases
+
+**REVISED 2026-09-27 after a reviewer found a real false-safe defect. Read
+the "Why this changed" note below before anything else in this section --
+the previous version of this rule was wrong, not just imprecise.**
 
 The system's one hard rule (PLAN.md ground rules) is: **a false "safe to
 cross" is the only unacceptable failure.** Every rule below is written to
 protect that, even where it costs recall.
 
-- **Amber/yellow:** label as **signal_red**, never signal_green, and never a
-  third class. Amber means traffic is stopping but may still be moving —
-  treating it as red is the conservative direction of the error. Do not
-  invent a signal_amber class; PLAN.md fixes the class list at 9 and amber
-  data is too sparse to support a 10th class properly.
+### Why this changed
+
+This section used to say (verbatim): *"Pedestrian signal (walking-man icon)
+vs vehicle signal: label with the same signal_red/signal_green classes — we
+do not have separate classes for pedestrian vs vehicle signals."* That rule
+was the root cause of a real false-safe path: src/fsm.py's SAFE_TO_CROSS
+rule fired on ANY signal_green detection, and roughly four of the five
+public signal datasets this project trains on are VEHICLE traffic lights
+shot from inside a car (see scripts/download_signal_datasets.py's
+docstring). A green light for CARS means traffic has right of way — it is
+evidence of danger to a pedestrian, not permission to cross. Sharing one
+class between the two meanings meant the model (and the FSM) could not tell
+"you may walk" from "cars may go," and the concrete failure mode was: a
+vehicle light turns green, cars approaching from the side or driving away
+from the camera don't register as an approaching-TTC threat, and the system
+announces "safe to cross now" exactly as traffic accelerates through the
+junction. This is now fixed by splitting the taxonomy into four classes:
+**ped_signal_red, ped_signal_green, veh_signal_red, veh_signal_green.**
+Only ped_signal_green may ever produce a SAFE verdict; the other three are
+all WAIT-only evidence in src/fsm.py, including veh_signal_red — a stopped
+vehicle does not tell a pedestrian anything about turning traffic, a second
+carriageway, or a stale observation, so it is deliberately NOT sufficient
+for SAFE either.
+
+- **Amber/yellow:** label as **ped_signal_red or veh_signal_red** (matching
+  whether it's a pedestrian or vehicle signal head), never the green side of
+  that pair, and never a third class. Amber means traffic is stopping but
+  may still be moving — treating it as red is the conservative direction of
+  the error. Do not invent a signal_amber class; PLAN.md fixes the class
+  list at 12 and amber data is too sparse to support a 13th class properly.
 - **Signal off / blank (no lamp lit):** **do not label it at all.** An unlit
   signal gives no evidence either way, and forcing it into red or green
   would teach the model a colour that was not actually shown. This does mean
   a real-world blank/broken signal will be invisible to the system — that is
   a known, accepted limitation, not a labelling bug.
 - **Pedestrian signal (walking-man icon) vs vehicle signal:** label with the
-  same signal_red/signal_green classes — we do not have separate classes for
-  pedestrian vs vehicle signals. If a frame has both a vehicle signal and a
-  pedestrian signal showing **different** colours (this happens — pedestrian
-  red can persist slightly after vehicle green, or vice versa), label
-  **both boxes with their own true colour**. Do not average or guess a
+  matching pair — **ped_signal_red/ped_signal_green** for a walking-man
+  icon, **veh_signal_red/veh_signal_green** for a standard vehicle traffic
+  light. These are now separate classes precisely because they mean
+  different things to a pedestrian (see "Why this changed" above). If a
+  frame has both a vehicle signal and a pedestrian signal showing
+  **different** colours (this happens — pedestrian red can persist slightly
+  after vehicle green, or vice versa), label **both boxes, each with its own
+  true colour AND its own correct ped/veh class**. Do not average or guess a
   single answer for the frame; the model should see both signals as they
-  actually are.
+  actually are, and must be able to tell which one is which.
 - **Ambiguous colour** (glare, low resolution, backlit sky, camera
   exposure has blown out the lamp to white): **do not label it as either
   colour.** Skip the box entirely rather than guess. A guessed green that is
   actually red is exactly the false-safe failure mode we are trying to
   avoid; an unlabelled signal just costs recall, which is the safe side to
   err on.
+- **Ambiguous ped vs veh** (can't tell from the frame whether a signal head
+  is a pedestrian walking-man signal or a vehicle light — e.g. too small,
+  too far, unfamiliar signal design): **do not label it at all**, same
+  reasoning as ambiguous colour. Guessing "pedestrian" on a vehicle light
+  would recreate exactly the false-safe path this split exists to close.
 - **When two lamps appear lit at once** (bad bulb, camera rolling shutter
   artifact): skip the box. This is not a real state a driver/pedestrian
   would treat as meaningful, and forcing a single label would be a guess.

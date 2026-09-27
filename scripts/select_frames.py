@@ -6,7 +6,7 @@ out of everything scripts/extract_frames.py + scripts/prelabel.py produced.
 Why this exists: extract_frames.py is deliberately generous per clip (see
 the per-clip interval choices recorded when it was run for Phase 4 -- short
 signal/crossing clips are sampled tightly because they are the only source
-of signal_red/signal_green and crosswalk data, long walking-tour clips are
+of ped/veh signal (red/green) and crosswalk data, long walking-tour clips are
 sampled loosely because 0.5s on 30 minutes of pavement would be 4300 near-
 identical frames). Even after that judgement call, the resulting pool is
 bigger than PLAN.md's Phase 4 step 5 budget (800-1200 corrected frames).
@@ -16,7 +16,7 @@ transfer confidence) instead of the frames that matter (a signal, a
 crosswalk, an autorickshaw).
 
 Ranking, in priority order (highest value first):
-  0. signal_red / signal_green present  -- these classes have ZERO Indian
+  0. ped_signal_red/green or veh_signal_red/green present  -- these classes have ZERO Indian
      training data before Phase 4 and the model cannot pre-label them at
      any confidence. Every one of these frames is irreplaceable.
   1. crosswalk present                  -- only 417 crosswalk annotations
@@ -70,9 +70,12 @@ from PIL import Image
 
 IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png")
 
-# Same unified 10-class list as prelabel.py / pseudo_label.py / PLAN.md, in
+# Same unified 12-class list as prelabel.py / pseudo_label.py / PLAN.md, in
 # ID order. Kept as a literal copy (not imported) because these scripts are
 # meant to be run independently against whatever labels are on disk.
+# signal_red/signal_green were split into ped_signal_*/veh_signal_* after a
+# reviewer found a false-safe path -- see scripts/generate_mapping.py and
+# src/fsm.py.
 UNIFIED_NAMES = [
     "car",
     "bus",
@@ -81,21 +84,24 @@ UNIFIED_NAMES = [
     "autorickshaw",
     "person",
     "crosswalk",
-    "signal_red",
-    "signal_green",
+    "ped_signal_red",
+    "ped_signal_green",
+    "veh_signal_red",
+    "veh_signal_green",
     "signal_countdown",
 ]
 (
     CAR_ID, BUS_ID, TRUCK_ID, MOTO_ID, AUTO_ID, PERSON_ID, CROSSWALK_ID,
-    SIGNAL_RED_ID, SIGNAL_GREEN_ID, SIGNAL_COUNTDOWN_ID,
-) = range(10)
+    PED_SIGNAL_RED_ID, PED_SIGNAL_GREEN_ID, VEH_SIGNAL_RED_ID, VEH_SIGNAL_GREEN_ID,
+    SIGNAL_COUNTDOWN_ID,
+) = range(12)
 
 CROWD_THRESHOLD = 6  # person boxes at/above this count counts as "unusually crowded" (rule 2)
 BORING_MAX_BOXES = 2  # tier-4 cutoff: at most this many boxes, and only from BORING_CLASSES
 BORING_CLASSES = {CAR_ID, TRUCK_ID}
 
 TIER_LABELS = {
-    0: "signal_red/signal_green/signal_countdown present -- zero Indian training data, irreplaceable",
+    0: "ped/veh signal_red/signal_green/signal_countdown present -- zero Indian training data, irreplaceable",
     1: "crosswalk present -- only 417 crosswalk annotations exist across all datasets",
     2: "autorickshaw/bus present or unusually crowded (person >= 6)",
     3: "ordinary frame with at least one detection",
@@ -135,14 +141,9 @@ def classify(class_ids):
     """Return (tier, reason) for one frame given its list of class ids."""
     counts = {i: class_ids.count(i) for i in set(class_ids)}
 
-    if SIGNAL_RED_ID in counts or SIGNAL_GREEN_ID in counts or SIGNAL_COUNTDOWN_ID in counts:
-        colours = []
-        if SIGNAL_RED_ID in counts:
-            colours.append(f"signal_red x{counts[SIGNAL_RED_ID]}")
-        if SIGNAL_GREEN_ID in counts:
-            colours.append(f"signal_green x{counts[SIGNAL_GREEN_ID]}")
-        if SIGNAL_COUNTDOWN_ID in counts:
-            colours.append(f"signal_countdown x{counts[SIGNAL_COUNTDOWN_ID]}")
+    signal_ids = (PED_SIGNAL_RED_ID, PED_SIGNAL_GREEN_ID, VEH_SIGNAL_RED_ID, VEH_SIGNAL_GREEN_ID, SIGNAL_COUNTDOWN_ID)
+    if any(sid in counts for sid in signal_ids):
+        colours = [f"{UNIFIED_NAMES[sid]} x{counts[sid]}" for sid in signal_ids if sid in counts]
         return 0, "tier0: " + ", ".join(colours)
 
     if CROSSWALK_ID in counts:

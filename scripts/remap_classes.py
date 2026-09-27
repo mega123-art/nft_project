@@ -1,6 +1,6 @@
 """
 Phase 1 step 3: remap a downloaded dataset's class IDs onto our unified
-10-class list, dropping everything we don't want.
+12-class list, dropping everything we don't want.
 
 Takes a source dataset directory (as downloaded by download_datasets.py, in
 YOLOv8 format: train/valid/test splits, each with images/ and labels/) and a
@@ -21,8 +21,12 @@ import os
 
 MARKER_NAME = ".remapped"
 
-# our unified 10-class list, in ID order, used only for printing readable
+# our unified 12-class list, in ID order, used only for printing readable
 # per-class counts. It has nothing to do with the source dataset's own names.
+# signal_red/signal_green were split into ped_signal_*/veh_signal_* after a
+# reviewer found a false-safe path (a green VEHICLE light being read as
+# pedestrian permission to cross) -- see scripts/generate_mapping.py and
+# src/fsm.py for the full story.
 UNIFIED_NAMES = [
     "car",
     "bus",
@@ -31,8 +35,10 @@ UNIFIED_NAMES = [
     "autorickshaw",
     "person",
     "crosswalk",
-    "signal_red",
-    "signal_green",
+    "ped_signal_red",
+    "ped_signal_green",
+    "veh_signal_red",
+    "veh_signal_green",
     "signal_countdown",
 ]
 
@@ -120,7 +126,7 @@ def image_path_for_label(label_path):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Remap a dataset's class IDs to the unified 10-class list")
+    parser = argparse.ArgumentParser(description="Remap a dataset's class IDs to the unified 12-class list")
     parser.add_argument("dataset_dir", help="path to the downloaded dataset (e.g. data/datasets/indian_roads)")
     parser.add_argument("mapping_json", help="path to a JSON file of {old_id: new_id}")
     parser.add_argument("--dry-run", action="store_true", help="print before/after counts without changing anything")

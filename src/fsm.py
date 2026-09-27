@@ -15,8 +15,9 @@ this file resolves to WAITING, never to SAFE_TO_CROSS.
 
 ADDED RULE NOT IN PLAN.md's ORIGINAL TABLE: a vehicle turning into the
 crossing (safety.py's VehicleTracker.crossing_vehicles()) forces WAITING
-with its own reason string, checked right after signal_red and before
-anything that can emit SAFE. PLAN.md's Phase 6 table only reasons about
+with its own reason string, checked right after the red/vehicle-green
+signal rules and before anything that can emit SAFE. PLAN.md's Phase 6
+table only reasons about
 min_ttc (a head-on closing-distance model), which cannot see a turning
 vehicle's real risk -- see safety.py's module docstring for why a turning
 vehicle can have a weak or absent TTC while still being the most dangerous
@@ -47,11 +48,45 @@ no frame-level confidence score and no tilt detector anywhere in
 detector.py/safety.py. Rather than invent a fake signal, this module uses
 the one piece of real confidence information it has (each Detection's own
 `conf`, from detector.py) as the practical stand-in: crosswalk and
-signal_green -- the two classes whose presence pushes toward SAFE -- are
-only trusted above POSITIVE_EVIDENCE_MIN_CONF; signal_red is trusted at any
-confidence the detector already passed, because a false-positive red only
-ever produces extra, harmless caution, never a false SAFE. The try/except in
-update() is the hook a future camera-tilt signal would raise into.
+ped_signal_green -- the two classes whose presence pushes toward SAFE -- are
+only trusted above POSITIVE_EVIDENCE_MIN_CONF; every class that only ever
+pushes toward WAITING (ped_signal_red, veh_signal_red, veh_signal_green) is
+trusted at any confidence the detector already passed, because a
+false-positive there only ever produces extra, harmless caution, never a
+false SAFE. The try/except in update() is the hook a future camera-tilt
+signal would raise into.
+
+POST-REVIEW FIX (signal taxonomy split): this file used to have one
+signal_red/signal_green pair shared between PEDESTRIAN signals (walking-man
+icon, means "you may walk") and VEHICLE traffic lights (means "cars may
+go"), and rule 5 below let ANY signal_green license SAFE_TO_CROSS. A
+reviewer correctly flagged this as a false-safe path: four of the five
+signal datasets this project trains on are vehicle dashcam shots (see
+scripts/download_signal_datasets.py's docstring), so "signal_green" mostly
+meant "the traffic light facing the CARS turned green", i.e. traffic
+about to accelerate through the junction -- exactly the moment a pedestrian
+must NOT be told it is safe to cross. The classes are now split into
+ped_signal_red/ped_signal_green (pedestrian signal) and veh_signal_red/
+veh_signal_green (vehicle signal). Only ped_signal_green can ever produce
+SAFE_TO_CROSS. veh_signal_green is now treated as its own WAITING-only
+danger signal (rule 2b below), checked before the rule that can emit SAFE,
+so it can never be bypassed. veh_signal_red is explicitly NOT sufficient
+evidence for SAFE on its own (stopped vehicles say nothing about turning
+traffic, a stale observation, or a second carriageway) -- it is WAIT
+evidence like ped_signal_red, and neither of them alone unlocks rule 5's
+green check. See data/LABELLING.md section 2 for the full writeup.
+
+LEGACY WEIGHTS: models/best.pt (the currently-deployed model, trained before
+this split) still emits the OLD class names "signal_green"/"signal_red" and
+will keep doing so until it is retrained on the new 12-class taxonomy. A
+legacy "signal_green" detection must NEVER be able to reach SAFE_TO_CROSS --
+the whole point of this fix is that a bare "green" cannot be trusted as
+pedestrian permission. The conservative reading, given the training data was
+dominated by vehicle-light datasets, is to treat a legacy "signal_green" as
+if it were veh_signal_green (WAIT evidence, not SAFE evidence), and a legacy
+"signal_red" as WAIT evidence too (folded in with ped_signal_red/
+veh_signal_red). See _decide() below and
+tests/test_fsm.py::test_legacy_signal_green_from_old_weights_never_produces_safe.
 """
 
 from dataclasses import dataclass
@@ -96,9 +131,26 @@ CROSSING_MARGIN_S = 3.0
 # --- Confidence gate for positive evidence -------------------------------
 # See the module docstring's note on the "low-confidence frame" fail-safe:
 # this is the practical stand-in, applied only to the two classes whose
-# presence pushes toward SAFE (crosswalk, signal_green). signal_red is
-# deliberately NOT gated by this -- see _decide().
+# presence pushes toward SAFE (crosswalk, ped_signal_green). Every
+# WAIT-only signal class (ped_signal_red, veh_signal_red, veh_signal_green,
+# and legacy signal_red/signal_green from old weights) is deliberately NOT
+# gated by this -- see _decide().
 POSITIVE_EVIDENCE_MIN_CONF = 0.6
+
+# --- Legacy class-name compatibility (old models/best.pt) -----------------
+# models/best.pt was trained before the ped_signal_*/veh_signal_* split and
+# still emits the bare old names "signal_green"/"signal_red". It stays in
+# use until a retrain happens, so this module must keep recognising those
+# names -- and must map them to the CONSERVATIVE side of the new taxonomy,
+# never to anything that can unlock SAFE. The old training data was
+# dominated by vehicle dashcam datasets (see scripts/download_signal_
+# datasets.py's docstring), so a legacy "signal_green" is read as
+# veh_signal_green (WAIT evidence, danger: cars have right of way), and a
+# legacy "signal_red" is read as generic WAIT evidence alongside
+# ped_signal_red/veh_signal_red. See the module docstring's "LEGACY
+# WEIGHTS" section for the full reasoning.
+LEGACY_GREEN_WAIT_NAMES = ("veh_signal_green", "signal_green")
+LEGACY_RED_WAIT_NAMES = ("ped_signal_red", "veh_signal_red", "signal_red")
 
 # A crosswalk detection within this fraction of frame-half-width either side
 # of centre reads as "centre" rather than left/right -- without a dead band
@@ -236,10 +288,11 @@ class CrossingFSM:
         )
 
     def _decide(self, detections, tracker, frame_width):
-        """PLAN.md's five rules, in order, plus one added rule (turning
-        vehicles -- see rule 3 below and the module docstring) inserted
-        between signal_red and the TTC check so it can never be bypassed by
-        the one rule that emits SAFE. Returns
+        """PLAN.md's five rules, in order, plus two added rules inserted
+        before the TTC check so neither can ever be bypassed by the one rule
+        that emits SAFE: rule 2b (a green VEHICLE signal is WAIT evidence,
+        see module docstring's "POST-REVIEW FIX") and rule 3 (turning
+        vehicles, see module docstring). Returns
         (raw_state, raw_reason, min_ttc, crosswalk_offset, crosswalk_direction)
         for THIS frame only -- no hysteresis applied here."""
         crosswalk_det = _best_detection(detections, "crosswalk", POSITIVE_EVIDENCE_MIN_CONF)
@@ -252,15 +305,34 @@ class CrossingFSM:
         if crosswalk_det is None:
             return SEARCHING, "looking for a crossing", None, offset, direction
 
-        # Rule 2: signal_red present -> WAITING, unconditionally. No
-        # confidence gate here on purpose (see module docstring): a
-        # false-positive red only ever produces extra caution, so there is
-        # no safety reason to demand a higher bar for it, and demanding one
-        # would risk missing a real red. This check happens BEFORE min_ttc
-        # or signal_green are even looked at, so nothing below can override
-        # a red light -- this is what makes the red-light test unmissable.
-        if any(d.cls_name == "signal_red" for d in detections):
+        # Rule 2: any red signal (pedestrian, vehicle, or legacy) present ->
+        # WAITING, unconditionally. No confidence gate here on purpose (see
+        # module docstring): a false-positive red only ever produces extra
+        # caution, so there is no safety reason to demand a higher bar for
+        # it, and demanding one would risk missing a real red. This check
+        # happens BEFORE min_ttc or any green signal is even looked at, so
+        # nothing below can override a red light -- this is what makes the
+        # red-light test unmissable. ped_signal_red and veh_signal_red are
+        # both WAIT-only signals; neither one, alone or together, is ever
+        # sufficient for SAFE (see rule 5) -- a stopped vehicle does not mean
+        # a pedestrian has permission.
+        if any(d.cls_name in LEGACY_RED_WAIT_NAMES for d in detections):
             return WAITING, "wait, signal is red", tracker.min_ttc(), offset, direction
+
+        # Rule 2b (added, post-review fix -- see module docstring's
+        # "POST-REVIEW FIX" section): a green VEHICLE signal (or a legacy
+        # "signal_green" from old weights, conservatively read as a vehicle
+        # signal) -> WAITING, unconditionally, same no-confidence-gate
+        # reasoning as rule 2. This is the heart of the false-safe fix: a
+        # green light for CARS means traffic has right of way, which is
+        # positive evidence of danger to a pedestrian, not permission to
+        # cross. This must be checked BEFORE rule 5 (the only rule that can
+        # emit SAFE) so it can never be bypassed by a coincidentally-present
+        # ped_signal_green in the same frame -- if both are visible, that is
+        # a scene that needs a human's judgement, not this system's, so it
+        # resolves to the conservative side.
+        if any(d.cls_name in LEGACY_GREEN_WAIT_NAMES for d in detections):
+            return WAITING, "wait, vehicle signal is green", tracker.min_ttc(), offset, direction
 
         # Rule 3 (added, not in PLAN.md's original five-rule table -- see
         # module docstring): a vehicle turning into the crossing. This has
@@ -289,14 +361,24 @@ class CrossingFSM:
         if min_ttc is not None and min_ttc < DECISION_TTC_THRESHOLD:
             return WAITING, "wait, vehicle approaching", min_ttc, offset, direction
 
-        # Rule 5: green signal AND a road we can honestly call clear.
-        signal_green = _best_detection(detections, "signal_green", POSITIVE_EVIDENCE_MIN_CONF)
-        if signal_green is not None and self._road_is_clear(min_ttc, tracker.unresolved_vehicles()):
+        # Rule 5: PEDESTRIAN green signal AND a road we can honestly call
+        # clear. Only ped_signal_green may license SAFE_TO_CROSS -- this is
+        # the one and only rule in this whole file that can return
+        # SAFE_TO_CROSS, and it is gated at POSITIVE_EVIDENCE_MIN_CONF (see
+        # module docstring's confidence-asymmetry note). veh_signal_green
+        # (and legacy signal_green) can never reach here: rule 2b above
+        # already returned WAITING for them. veh_signal_red alone is also
+        # not looked at here at all -- it is WAIT evidence (rule 2), never
+        # SAFE evidence, so its mere absence is not treated as permission
+        # either; only an actual ped_signal_green detection can produce SAFE.
+        ped_signal_green = _best_detection(detections, "ped_signal_green", POSITIVE_EVIDENCE_MIN_CONF)
+        if ped_signal_green is not None and self._road_is_clear(min_ttc, tracker.unresolved_vehicles()):
             return SAFE_TO_CROSS, "safe to cross now", min_ttc, offset, direction
 
-        # Rule 6: otherwise -- e.g. no signal detected at all, signal_green
-        # too low-confidence to trust, or the road fails the crossing-time
-        # or unresolved-vehicle check. PLAN.md's default is always "wait".
+        # Rule 6: otherwise -- e.g. no pedestrian signal detected at all,
+        # ped_signal_green too low-confidence to trust, or the road fails
+        # the crossing-time or unresolved-vehicle check. PLAN.md's default
+        # is always "wait".
         return WAITING, "unclear, please wait", min_ttc, offset, direction
 
     def _road_is_clear(self, min_ttc, unresolved_vehicles):

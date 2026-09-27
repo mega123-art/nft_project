@@ -59,21 +59,40 @@ Every dataset gets remapped to exactly these IDs. Nothing else.
 | 4 | autorickshaw | Indian datasets only (merge "Rikshaw", "Auto") |
 | 5 | person | all datasets |
 | 6 | crosswalk | Roboflow zebra crossing + our own footage |
-| 7 | signal_red | Roboflow + our own footage |
-| 8 | signal_green | Roboflow + our own footage |
-| 9 | signal_countdown | our own footage only (see note) |
+| 7 | ped_signal_red | Roboflow (ono-gedd7 pedestrian dataset) + our own footage |
+| 8 | ped_signal_green | Roboflow (ono-gedd7 pedestrian dataset) + our own footage |
+| 9 | veh_signal_red | Roboflow (vehicle dashcam signal datasets) + our own footage |
+| 10 | veh_signal_green | Roboflow (vehicle dashcam signal datasets) + our own footage |
+| 11 | signal_countdown | our own footage only (see note) |
 
-Classes 6-8 will be weak after Phase 2 and are mainly fixed by our own
+**REVISED 2026-09-27:** classes 7-8 used to be a single signal_red/
+signal_green pair shared between pedestrian and vehicle signals. A reviewer
+found this was a real false-safe defect: src/fsm.py let ANY signal_green
+license SAFE_TO_CROSS, but roughly four of the five public signal datasets
+this project trains on are vehicle traffic lights (dashcam shots), not
+pedestrian walking-man signals -- so a green light telling CARS to go could
+tell a pedestrian "safe to cross now" right as traffic accelerated through
+the junction. The pair was split into ped_signal_red/ped_signal_green
+(pedestrian signal -- the only class that may license SAFE) and
+veh_signal_red/veh_signal_green (vehicle signal -- both are WAIT-only
+evidence in src/fsm.py, including veh_signal_red, which alone is still not
+sufficient for SAFE). See data/LABELLING.md section 2 and src/fsm.py's
+module docstring for the full writeup. models/best.pt was trained before
+this split and still emits the old signal_red/signal_green names; src/fsm.py
+treats a legacy "signal_green" conservatively as veh_signal_green (WAIT
+evidence) until a retrain happens.
+
+Classes 6-10 will be weak after Phase 2 and are mainly fixed by our own
 footage in Phase 4. That is expected. Do not try to fix it earlier.
 
-Class 9 (signal_countdown, added later than the rest of this table) is the
+Class 11 (signal_countdown, added later than the rest of this table) is the
 numeric countdown timer many Indian signals show alongside the lamp. Be
 honest about it: as of adding this class, no public dataset we use carries
 boxed countdown-signal annotations (checked against Roboflow Universe), so
 this class trains to 0.0 mAP50 until our own Phase 4 footage supplies
-labelled examples -- exactly the same starting position signal_red/
-signal_green were in before Phase 3. See data/LABELLING.md for the proposed
-labelling and decision-interaction conventions.
+labelled examples -- exactly the same starting position the signal classes
+were in before Phase 3. See data/LABELLING.md for the proposed labelling
+and decision-interaction conventions.
 
 ---
 
@@ -219,7 +238,7 @@ almost no pedestrian-standing-at-kerb footage.
 7. Merge into the training set and retrain. Weight our own data by duplicating
    it 2-3x so it is not drowned out.
 
-**Done when:** crosswalk and signal_red/signal_green mAP50 are usable (> 0.6)
+**Done when:** crosswalk and the signal classes' mAP50 are usable (> 0.6)
 on a held-out set of our own footage that was never trained on.
 
 ---
@@ -255,15 +274,28 @@ where you can count seconds manually.
 `src/fsm.py`. States:
 `SEARCHING -> AT_CROSSING -> WAITING -> SAFE_TO_CROSS -> CROSSING -> DONE`
 
-Rules, in order:
+Rules, in order (**REVISED 2026-09-27** -- see the class-list note above and
+data/LABELLING.md section 2: signal_red/signal_green were split into
+ped_signal_*/veh_signal_* after a reviewer found a false-safe path where a
+green VEHICLE light could be read as pedestrian permission to cross):
 
 ```
-no crosswalk detected           -> SEARCHING,  "looking for a crossing"
-signal_red present              -> WAITING,    "wait, signal is red"
-min_ttc is not None and < 5.0   -> WAITING,    "wait, vehicle approaching"
-signal_green and road is clear  -> SAFE,       "safe to cross now"
-otherwise                       -> WAITING,    "unclear, please wait"
+no crosswalk detected               -> SEARCHING,  "looking for a crossing"
+ped_signal_red/veh_signal_red/       -> WAITING,    "wait, signal is red"
+  legacy signal_red present
+veh_signal_green/legacy signal_green -> WAITING,    "wait, vehicle signal is green"
+  present
+min_ttc is not None and < 5.0        -> WAITING,    "wait, vehicle approaching"
+ped_signal_green and road is clear   -> SAFE,       "safe to cross now"
+otherwise                            -> WAITING,    "unclear, please wait"
 ```
+
+Only `ped_signal_green` may ever produce SAFE. `veh_signal_green` (and a
+legacy "signal_green" from the not-yet-retrained models/best.pt, read
+conservatively as a vehicle signal) is itself WAIT evidence, checked before
+the TTC/SAFE rules so it can never be bypassed. `veh_signal_red` alone is
+also never sufficient for SAFE -- a stopped vehicle says nothing about
+turning traffic, a second carriageway, or a stale observation.
 
 Plus:
 

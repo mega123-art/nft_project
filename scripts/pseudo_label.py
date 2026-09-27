@@ -76,11 +76,15 @@ from ultralytics import YOLO
 
 MARKER_NAME = ".pseudo_labeled"
 
-# our unified 10-class list, in ID order, used only for printing readable
-# per-class counts. signal_countdown (9) is never produced by this script --
-# COCO has no countdown-timer class to pull pseudo-labels from -- but is
-# listed here anyway so this copy matches every other UNIFIED_NAMES in the
-# repo exactly.
+# our unified 12-class list, in ID order, used only for printing readable
+# per-class counts. signal_countdown (11) and all four signal classes
+# (ped_signal_red, ped_signal_green, veh_signal_red, veh_signal_green) are
+# never produced by this script -- COCO has a generic "traffic light" class
+# with no colour or ped/veh distinction, and no countdown-timer class at
+# all -- but they are listed here anyway so this copy matches every other
+# UNIFIED_NAMES in the repo exactly. (signal_red/signal_green were split
+# into ped_signal_*/veh_signal_* after a reviewer found a false-safe path --
+# see scripts/generate_mapping.py and src/fsm.py.)
 UNIFIED_NAMES = [
     "car",
     "bus",
@@ -89,8 +93,10 @@ UNIFIED_NAMES = [
     "autorickshaw",
     "person",
     "crosswalk",
-    "signal_red",
-    "signal_green",
+    "ped_signal_red",
+    "ped_signal_green",
+    "veh_signal_red",
+    "veh_signal_green",
     "signal_countdown",
 ]
 

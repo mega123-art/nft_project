@@ -1,6 +1,6 @@
 train: /home/parth/nft_project/data/datasets/merged/train/images
 val: /home/parth/nft_project/data/datasets/merged/val/images
-nc: 10
+nc: 12
 names:
   - car
   - bus
@@ -9,6 +9,8 @@ names:
   - autorickshaw
   - person
   - crosswalk
-  - signal_red
-  - signal_green
+  - ped_signal_red
+  - ped_signal_green
+  - veh_signal_red
+  - veh_signal_green
   - signal_countdown

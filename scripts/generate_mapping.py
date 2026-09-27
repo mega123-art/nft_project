@@ -20,10 +20,30 @@ import os
 
 import yaml
 
-# signal_countdown (9) has no source names below and is never produced by
+# signal_countdown (11) has no source names below and is never produced by
 # this script's mapping -- see PLAN.md's class table and data/LABELLING.md.
 # Listed anyway so UNIFIED_ID/UNIFIED_NAMES stay identical across every
 # copy of this list in the repo.
+#
+# --- signal_red/signal_green split into ped_*/veh_* (post-review fix) ---
+# A reviewer found a false-safe path: the old signal_red/signal_green pair
+# conflated PEDESTRIAN signals (walking-man icon, means "you may walk") with
+# VEHICLE traffic lights (means "cars may go"), and src/fsm.py's SAFE rule
+# treated ANY signal_green the same way. A green VEHICLE light is not
+# permission for a pedestrian to cross -- it is the opposite, it means
+# traffic has right of way. See data/LABELLING.md section 2 for the full
+# writeup of why the old shared-class rule was wrong.
+#
+# The split is mechanically clean because of how the source datasets happen
+# to name things: ono-gedd7/pedestrian-traffic-light-puf4a (the only
+# pedestrian-signal dataset in this project) uses bare lowercase "green"/
+# "red", while every vehicle-signal dataset (group-e, traffic-light-
+# detection-l869b, traffic-si0cm, fyp-wrdsh) uses capitalised or prefixed
+# names (Green, GreenLeft, Red Light, Traffic_light_green, ...). Verified by
+# reading every data.yaml under data/datasets/ before relying on this: none
+# of indian_roads/signals_detection/signals_small/zebra_crossing carry a
+# bare lowercase "green" or "red", so this split cannot silently move a
+# vehicle-light box into the pedestrian classes or vice versa.
 UNIFIED_NAMES = [
     "car",
     "bus",
@@ -32,8 +52,10 @@ UNIFIED_NAMES = [
     "autorickshaw",
     "person",
     "crosswalk",
-    "signal_red",
-    "signal_green",
+    "ped_signal_red",
+    "ped_signal_green",
+    "veh_signal_red",
+    "veh_signal_green",
     "signal_countdown",
 ]
 UNIFIED_ID = {name: i for i, name in enumerate(UNIFIED_NAMES)}
@@ -60,55 +82,67 @@ NAME_TO_UNIFIED = {
     "Zebra-Crossing": "crosswalk",
 
     # --- Phase 3: signal-colour datasets (group-e, traffic-light-detection,
-    # traffic-si0cm) --- all Red* variants (including amber/yellow) map to
-    # signal_red, all Green* variants map to signal_green. "off" (an unlit
-    # lamp) is deliberately NOT in this table at all, so it is dropped by
-    # the same "unmapped name -> dropped" path as everything else -- see
-    # data/LABELLING.md section 2: an unlit signal gives no evidence and
-    # must not be labelled a colour.
-    "Red": "signal_red",
-    "RedLeft": "signal_red",
-    "RedRight": "signal_red",
-    "RedStraight": "signal_red",
-    "RedStraightLeft": "signal_red",
-    "Red Light": "signal_red",
-    "Red-Light": "signal_red",  # defensive: not the real export name (see download_signal_datasets.py),
-                                 # kept in case a future re-export uses it.
-    # Amber/Yellow -> signal_red, NOT a third class and NOT signal_green.
+    # traffic-si0cm) --- these are ALL vehicle traffic lights (dashcam-style
+    # exports, shot from inside a car -- see download_signal_datasets.py's
+    # docstring), so every Red*/Green* variant maps to the veh_signal_*
+    # classes, never the ped_signal_* ones. All Red* variants (including
+    # amber/yellow) map to veh_signal_red, all Green* variants map to
+    # veh_signal_green. "off" (an unlit lamp) is deliberately NOT in this
+    # table at all, so it is dropped by the same "unmapped name -> dropped"
+    # path as everything else -- see data/LABELLING.md section 2: an unlit
+    # signal gives no evidence and must not be labelled a colour.
+    "Red": "veh_signal_red",
+    "RedLeft": "veh_signal_red",
+    "RedRight": "veh_signal_red",
+    "RedStraight": "veh_signal_red",
+    "RedStraightLeft": "veh_signal_red",
+    "Red Light": "veh_signal_red",
+    "Red-Light": "veh_signal_red",  # defensive: not the real export name (see download_signal_datasets.py),
+                                     # kept in case a future re-export uses it.
+    # Amber/Yellow -> veh_signal_red, NOT a third class and NOT *_green.
     # This is deliberate, not a copy-paste mistake: data/LABELLING.md
     # section 2 rules that amber means "traffic may still be moving" and
     # must be treated as the conservative (red) case, because a false SAFE
-    # is the one failure mode this whole project cannot tolerate.
-    "Yellow": "signal_red",
-    "Yellow Light": "signal_red",
-    "Yellow-Light": "signal_red",  # defensive, see Red-Light note above
-    "Green": "signal_green",
-    "GreenLeft": "signal_green",
-    "GreenRight": "signal_green",
-    "GreenStraight": "signal_green",
-    "GreenStraightLeft": "signal_green",
-    "GreenStraightRight": "signal_green",
-    "Green Light": "signal_green",
-    "Green-Light": "signal_green",  # defensive, see Red-Light note above
+    # is the one failure mode this whole project cannot tolerate. That
+    # reasoning is unchanged by the ped/veh split -- amber is a vehicle-
+    # light phase, so it stays on the veh_signal_red side.
+    "Yellow": "veh_signal_red",
+    "Yellow Light": "veh_signal_red",
+    "Yellow-Light": "veh_signal_red",  # defensive, see Red-Light note above
+    "Green": "veh_signal_green",
+    "GreenLeft": "veh_signal_green",
+    "GreenRight": "veh_signal_green",
+    "GreenStraight": "veh_signal_green",
+    "GreenStraightLeft": "veh_signal_green",
+    "GreenStraightRight": "veh_signal_green",
+    "Green Light": "veh_signal_green",
+    "Green-Light": "veh_signal_green",  # defensive, see Red-Light note above
 
     # --- Phase 4: pedestrian-signal round (ono-gedd7, fyp-wrdsh) ---
     # ono-gedd7/pedestrian-traffic-light-puf4a's real data.yaml (v1) uses
-    # bare lowercase "green"/"red" -- checked against every data.yaml
-    # already downloaded into data/datasets/ (indian_roads, signals_detection,
-    # signals_small, zebra_crossing) plus the group-e/traffic-si0cm class
-    # lists documented in download_signal_datasets.py's docstring: none of
-    # them contain a bare lowercase "green" or "red", only capitalised
-    # variants (Green, GreenLeft, Red Light, ...), so adding these two keys
-    # cannot silently re-map any class already in this table. Still, this
-    # was only checked against what's on disk right now -- re-verify against
-    # signals_group_e's actual data.yaml once it's downloaded, in case a
-    # future export ever introduces a lowercase name there.
-    "green": "signal_green",
-    "red": "signal_red",
-    # fyp-wrdsh/road-signs-and-traffic-lights-dataset's own vehicle-signal
-    # classes carry the colour in the name already, same pattern as group-e.
-    "Traffic_light_green": "signal_green",
-    "Traffic_light_red": "signal_red",
+    # bare lowercase "green"/"red", and it is the ONLY dataset in this
+    # project that actually shows a pedestrian walking-man signal -- so
+    # these two keys are the ONLY source names that map to the ped_signal_*
+    # classes. Checked against every data.yaml already downloaded into
+    # data/datasets/ (indian_roads, signals_detection, signals_small,
+    # zebra_crossing) plus the group-e/traffic-si0cm class lists documented
+    # in download_signal_datasets.py's docstring: none of them contain a
+    # bare lowercase "green" or "red", only capitalised variants (Green,
+    # GreenLeft, Red Light, ...), so adding these two keys cannot silently
+    # re-map any class already in this table. Still, this was only checked
+    # against what's on disk right now -- re-verify against signals_group_e's
+    # actual data.yaml once it's downloaded, in case a future export ever
+    # introduces a lowercase name there (if it does, and it is genuinely a
+    # vehicle light, it must map to veh_signal_*, NOT here).
+    "green": "ped_signal_green",
+    "red": "ped_signal_red",
+    # fyp-wrdsh/road-signs-and-traffic-lights-dataset's Traffic_light_*
+    # classes are vehicle signals (see download_signal_datasets.py's
+    # docstring: fyp-wrdsh is described as adding "more vehicle
+    # signal_red/signal_green"), so these map to the veh_signal_* side,
+    # same pattern as group-e/traffic-si0cm above.
+    "Traffic_light_green": "veh_signal_green",
+    "Traffic_light_red": "veh_signal_red",
     # fyp-wrdsh also already labels car/person/motorcycle directly (lowercase,
     # COCO-style names) -- "person" is already covered by the existing
     # lowercase entry above, "car" and "motorcycle" are new lowercase keys.
@@ -135,9 +169,13 @@ NAME_TO_UNIFIED = {
 # literally named 81 W's (a bad label in the source project — see the
 # printed annotation count below, it should be near zero or this dataset's
 # label quality is worse than expected).
-# signal_red and signal_green intentionally have no source names: nothing in
-# the public datasets carries the red/green distinction. They get zero
-# public data by design (Phase 4 fixes this with our own footage).
+# (Historical note, now stale: this comment used to say signal_red/
+# signal_green had no source names at all. That was true before Phase 3/4
+# added the signal-colour datasets above. Now: veh_signal_red/veh_signal_green
+# get plenty of public data from group-e/traffic-light-detection/traffic-
+# si0cm/fyp-wrdsh (all vehicle dashcam shots); ped_signal_red/ped_signal_green
+# get public data ONLY from ono-gedd7 (the one pedestrian-signal dataset).
+# Our own Phase 4+ footage is still what fixes real-world coverage for both.)
 #
 # fyp-wrdsh's own ~20 road-sign classes (speed limits, no-entry, bends, etc.)
 # are likewise dropped on purpose here by simply not being in the table --
