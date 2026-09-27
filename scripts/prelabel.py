@@ -49,6 +49,10 @@ UNIFIED_NAMES = [
     "veh_signal_red",
     "veh_signal_green",
     "signal_countdown",
+    # signal_unknown (12): colourless signal boxes, absorbed rather than
+    # dropped so they are not learned as background. Must stay in step with
+    # scripts/generate_mapping.py's UNIFIED_NAMES.
+    "signal_unknown",
 ]
 
 # signal_countdown joins the four signal classes here: no public dataset we

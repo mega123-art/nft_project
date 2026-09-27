@@ -66,6 +66,12 @@ UNIFIED_NAMES = [
     "veh_signal_red",
     "veh_signal_green",
     "signal_countdown",
+    # signal_unknown (12): colourless signal boxes, absorbed rather than
+    # dropped so they are not learned as background. src/fsm.py never reads
+    # it. Must stay in step with scripts/generate_mapping.py's UNIFIED_NAMES
+    # -- a class list that disagrees between files writes an nc that does not
+    # match the label ids on disk, which trains garbage or crashes.
+    "signal_unknown",
 ]
 
 # IDs of the four signal classes, used by bucket_by_signal/stratified_sample
