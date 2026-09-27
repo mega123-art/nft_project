@@ -57,6 +57,12 @@ UNIFIED_NAMES = [
     "veh_signal_red",
     "veh_signal_green",
     "signal_countdown",
+    # Colourless signal boxes (a signal head whose lit lamp cannot be read).
+    # Asserts only "a signal exists here", never a colour. src/fsm.py never
+    # reads it; it exists so these boxes are not left unlabelled and thus
+    # learned as background. See the mapping entries below for the full
+    # reasoning.
+    "signal_unknown",
 ]
 UNIFIED_ID = {name: i for i, name in enumerate(UNIFIED_NAMES)}
 
@@ -148,15 +154,33 @@ NAME_TO_UNIFIED = {
     # lowercase entry above, "car" and "motorcycle" are new lowercase keys.
     "car": "car",
     "motorcycle": "motorcycle",
-    # Deliberately NOT mapped, so they fall through the existing
-    # unmapped-name-is-dropped path same as every other dropped class:
-    # ono-gedd7's "pedestrian Traffic Light", "traffic_light", "signal-light"
-    # and "trafficlight". All four are colourless (no red/green distinction
-    # in the class name itself), and data/LABELLING.md section 2 is explicit
-    # that a signal whose colour cannot be read must not be labelled a
-    # colour -- exactly why indian_roads' colourless "Traffic Signal" is
-    # already dropped above. Keeping that rule consistent here matters more
-    # than the extra boxes these four classes would add.
+    # ono-gedd7's four colourless signal classes. None of them says which
+    # lamp is lit, so data/LABELLING.md section 2 forbids giving them a
+    # colour -- the same rule that drops indian_roads' "Traffic Signal".
+    #
+    # They are NOT dropped, though, and that is a deliberate change. In
+    # ono-gedd7 they are 1478 boxes (traffic_light 522, "pedestrian Traffic
+    # Light" 761, signal-light 164, trafficlight 31) sitting in the SAME
+    # images that carry our ped_signal_green/ped_signal_red labels. Dropping
+    # a box does not remove the object from the image, it just leaves it
+    # unlabelled -- and YOLO treats unlabelled pixels as background, so
+    # dropping them would actively teach the model that signal-shaped
+    # objects are background. That is the partial-labelling poisoning that
+    # held the person class down to 0.576 earlier in this project.
+    #
+    # signal_unknown absorbs them instead: the boxes stop being background,
+    # while asserting nothing about colour. src/fsm.py never reads this
+    # class, so it cannot influence a crossing decision in either
+    # direction -- it exists purely to protect ped_signal_green, the one
+    # class that can license SAFE and the one with the least data (1054).
+    "pedestrian Traffic Light": "signal_unknown",
+    "traffic_light": "signal_unknown",
+    "signal-light": "signal_unknown",
+    "trafficlight": "signal_unknown",
+    "Traffic Signal": "signal_unknown",  # indian_roads' colourless class
+    # "off" (an unlit lamp) stays dropped: an unlit signal is not a signal
+    # the model should learn to find, and LABELLING.md section 2 rules it
+    # out explicitly.
 }
 # Everything else in the Indian dataset's real (v2) 48-class list is dropped
 # on purpose: Traffic Signal (no red/green colour info, so it's useless for

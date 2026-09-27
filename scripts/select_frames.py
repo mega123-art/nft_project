@@ -89,12 +89,13 @@ UNIFIED_NAMES = [
     "veh_signal_red",
     "veh_signal_green",
     "signal_countdown",
+    "signal_unknown",
 ]
 (
     CAR_ID, BUS_ID, TRUCK_ID, MOTO_ID, AUTO_ID, PERSON_ID, CROSSWALK_ID,
     PED_SIGNAL_RED_ID, PED_SIGNAL_GREEN_ID, VEH_SIGNAL_RED_ID, VEH_SIGNAL_GREEN_ID,
-    SIGNAL_COUNTDOWN_ID,
-) = range(12)
+    SIGNAL_COUNTDOWN_ID, SIGNAL_UNKNOWN_ID,
+) = range(13)
 
 CROWD_THRESHOLD = 6  # person boxes at/above this count counts as "unusually crowded" (rule 2)
 BORING_MAX_BOXES = 2  # tier-4 cutoff: at most this many boxes, and only from BORING_CLASSES
